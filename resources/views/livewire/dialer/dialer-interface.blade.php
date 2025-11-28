@@ -319,17 +319,48 @@
                         const channel = window.Echo.private(`call-session.${callSessionId}`);
 
                         channel.listen('.transcript.updated', (e) => {
-                            refreshComponent();
+                            console.log('Transcript updated event received:', e);
+                            const component = getLivewireComponent();
+                            if (component) {
+                                console.log('Calling reloadTranscripts on component');
+                                component.call('reloadTranscripts').then(() => {
+                                    console.log('reloadTranscripts completed, refreshing component');
+                                    refreshComponent();
+                                }).catch((error) => {
+                                    console.error('Error calling reloadTranscripts:', error);
+                                    refreshComponent();
+                                });
+                            } else {
+                                console.warn('No Livewire component found, just refreshing');
+                                refreshComponent();
+                            }
                         });
 
                         channel.listen('.ai.suggestion.updated', (e) => {
-                            refreshComponent();
+                            console.log('AI suggestion updated event received:', e);
+                            const component = getLivewireComponent();
+                            if (component) {
+                                component.call('reloadAiState').then(() => {
+                                    refreshComponent();
+                                });
+                            } else {
+                                refreshComponent();
+                            }
                         });
                     } catch (error) {
                         console.warn('Echo channel setup failed, using polling instead:', error);
                         // Fallback to polling if websockets fail
                         const pollInterval = setInterval(() => {
-                            refreshComponent();
+                            const component = getLivewireComponent();
+                            if (component) {
+                                component.call('reloadTranscripts').then(() => {
+                                    refreshComponent();
+                                }).catch(() => {
+                                    refreshComponent();
+                                });
+                            } else {
+                                refreshComponent();
+                            }
                         }, 3000);
 
                         // Stop polling when call ends
@@ -343,7 +374,16 @@
                     // Fallback to polling if Echo is not available
                     console.log('WebSockets not available, using polling for updates');
                     const pollInterval = setInterval(() => {
-                        refreshComponent();
+                        const component = getLivewireComponent();
+                        if (component) {
+                            component.call('reloadTranscripts').then(() => {
+                                refreshComponent();
+                            }).catch(() => {
+                                refreshComponent();
+                            });
+                        } else {
+                            refreshComponent();
+                        }
                     }, 3000);
 
                     // Stop polling when call ends

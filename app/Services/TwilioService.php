@@ -43,22 +43,6 @@ class TwilioService
     {
         $response = new VoiceResponse;
 
-        // Only add Stream if media stream URL is configured
-        $mediaStreamUrl = config('app.media_stream_url', env('MEDIA_STREAM_URL'));
-
-        if ($mediaStreamUrl) {
-            $connect = $response->connect();
-            $stream = $connect->stream([
-                'url' => $mediaStreamUrl,
-            ]);
-
-            // Add parameters as child Parameter elements
-            $stream->parameter(['name' => 'callSessionId', 'value' => (string) $callSession->id]);
-            if ($callSession->twilio_call_sid) {
-                $stream->parameter(['name' => 'twilioCallSid', 'value' => $callSession->twilio_call_sid]);
-            }
-        }
-
         // Clean phone number - remove any Unicode formatting characters and ensure proper format
         $phoneNumber = $callSession->contact->phone;
         // Remove all Unicode directional formatting characters
@@ -78,6 +62,41 @@ class TwilioService
             return $response->asXML();
         }
 
+        // Only add Stream if media stream URL is configured
+        $mediaStreamUrl = config('app.media_stream_url', env('MEDIA_STREAM_URL'));
+
+        // For browser-based calling with Media Streams:
+        // Use <Start><Stream> BEFORE <Dial> to initiate the media stream
+        // <Start> initiates the stream without redirecting the call, allowing <Dial> to execute
+        // This is the correct TwiML structure for Media Streams with Dial
+        if ($mediaStreamUrl) {
+            // Append parameters directly to the URL as query string
+            $urlParams = http_build_query([
+                'callSessionId' => (string) $callSession->id,
+            ]);
+
+            if ($callSession->twilio_call_sid) {
+                $urlParams .= '&'.http_build_query(['twilioCallSid' => $callSession->twilio_call_sid]);
+            }
+
+            // Append query string to URL
+            $streamUrl = $mediaStreamUrl.(str_contains($mediaStreamUrl, '?') ? '&' : '?').$urlParams;
+
+            // Use Start verb to initiate the stream (doesn't redirect the call)
+            $start = $response->start();
+            $stream = $start->stream([
+                'url' => $streamUrl,
+            ]);
+
+            // Add Parameter elements to Stream
+            $stream->parameter(['name' => 'callSessionId', 'value' => (string) $callSession->id]);
+            if ($callSession->twilio_call_sid) {
+                $stream->parameter(['name' => 'twilioCallSid', 'value' => $callSession->twilio_call_sid]);
+            }
+        }
+
+        // Dial the phone number
+        // This will execute after Start, allowing both streaming and dialing to work
         $dial = $response->dial(null, [
             'callerId' => config('services.twilio.phone_number'),
             'timeout' => 30, // Wait up to 30 seconds for the call to be answered

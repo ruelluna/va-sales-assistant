@@ -10,4 +10,6 @@ Route::prefix('twilio')->group(function () {
     Route::get('twiml', [TwilioWebhookController::class, 'twiml'])->name('api.twilio.twiml.query');
 });
 
-Route::post('media-stream', [MediaStreamController::class, 'store'])->name('api.media-stream.store');
+Route::post('media-stream', [MediaStreamController::class, 'store'])
+    ->middleware('auth:sanctum')
+    ->name('api.media-stream.store');

@@ -5,6 +5,7 @@ namespace App\Livewire\Dialer;
 use App\Models\CallSession;
 use App\Models\Campaign;
 use App\Models\Contact;
+use App\Services\TwilioService;
 use Livewire\Component;
 
 class DialerInterface extends Component
@@ -129,22 +130,12 @@ class DialerInterface extends Component
         ]);
 
         // Load transcripts and AI state for this specific call session
-        $this->transcripts = $this->activeCallSession->transcripts()
-            ->orderBy('timestamp', 'asc')
-            ->get()
-            ->map(function ($t) {
-                return [
-                    'speaker' => $t->speaker,
-                    'text' => $t->text,
-                    'timestamp' => $t->timestamp,
-                ];
-            })
-            ->toArray();
+        $this->reloadTranscripts();
+        $this->reloadAiState();
 
-        $aiState = $this->activeCallSession->ai_state ?? [];
-        $this->conversationState = $aiState['conversation_state'] ?? null;
-        $this->currentSuggestion = $aiState['recommended_reply'] ?? null;
-        $this->flags = $this->activeCallSession->real_time_tags ?? [];
+        // Note: For browser-based calling, the frontend JavaScript initiates the call
+        // via Twilio Device SDK. The TwiML URL is fetched by Twilio to get instructions
+        // on how to handle the call (dial the phone number and stream audio).
     }
 
     public function updateCallSid($callSid)
@@ -198,7 +189,23 @@ class DialerInterface extends Component
         }
 
         if ($this->activeCallSession) {
-            $this->transcripts = $this->activeCallSession->transcripts()
+            $this->reloadTranscripts();
+            $this->reloadAiState();
+        }
+    }
+
+    public function reloadTranscripts()
+    {
+        \Illuminate\Support\Facades\Log::info('reloadTranscripts called', [
+            'has_active_call_session' => $this->activeCallSession !== null,
+            'call_session_id' => $this->activeCallSession?->id,
+        ]);
+
+        if ($this->activeCallSession) {
+            // Refresh the call session to get latest data
+            $this->activeCallSession = $this->activeCallSession->fresh(['contact']);
+
+            $transcripts = $this->activeCallSession->transcripts()
                 ->orderBy('timestamp', 'asc')
                 ->get()
                 ->map(function ($t) {
@@ -210,6 +217,20 @@ class DialerInterface extends Component
                 })
                 ->toArray();
 
+            \Illuminate\Support\Facades\Log::info('Transcripts reloaded', [
+                'call_session_id' => $this->activeCallSession->id,
+                'transcript_count' => count($transcripts),
+            ]);
+
+            $this->transcripts = $transcripts;
+        } else {
+            \Illuminate\Support\Facades\Log::warning('reloadTranscripts called but no active call session');
+        }
+    }
+
+    public function reloadAiState()
+    {
+        if ($this->activeCallSession) {
             $aiState = $this->activeCallSession->ai_state ?? [];
             $this->conversationState = $aiState['conversation_state'] ?? null;
             $this->currentSuggestion = $aiState['recommended_reply'] ?? null;
@@ -264,6 +285,16 @@ class DialerInterface extends Component
 
     public function render()
     {
+        // Reload transcripts if we have an active call session
+        // This ensures transcripts are always up to date, even if Echo events fail
+        if ($this->activeCallSession) {
+            // Only reload if we don't already have transcripts loaded
+            // This prevents unnecessary database queries on every render
+            if (empty($this->transcripts)) {
+                $this->reloadTranscripts();
+            }
+        }
+
         $view = view('livewire.dialer.dialer-interface', [
             'campaigns' => Campaign::where('status', 'active')->get(),
         ]);
