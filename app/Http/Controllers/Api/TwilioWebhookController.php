@@ -194,7 +194,23 @@ class TwilioWebhookController extends Controller
                 $tempContact->phone = $phoneNumberToDial;
                 $tempContact->full_name = $contactData->full_name ?? null;
                 $tempContact->exists = true; // Mark as existing to prevent save attempts
+
+                // CRITICAL: Set the relation AND update contact_id to prevent lazy loading the wrong contact
                 $callSession->setRelation('contact', $tempContact);
+                // Temporarily override contact_id so if anything tries to lazy-load, it gets the right ID
+                // Note: We don't save this, it's just for this request
+                $callSession->setAttribute('contact_id', $contactIdToUse);
+
+                // Verify the temp contact is set correctly
+                Log::info('Temp contact set on call session', [
+                    'call_session_id' => $callSession->id,
+                    'temp_contact_id' => $tempContact->id,
+                    'temp_contact_phone' => $tempContact->phone,
+                    'call_session_contact_id' => $callSession->contact_id,
+                    'relation_loaded' => $callSession->relationLoaded('contact'),
+                    'contact_from_relation_id' => $callSession->contact->id ?? null,
+                    'contact_from_relation_phone' => $callSession->contact->phone ?? null,
+                ]);
             } else {
                 // Load with correct contact if no URL override needed
                 $callSession = CallSession::with('contact')->findOrFail($callSessionData->id);
