@@ -294,6 +294,13 @@ class DialerInterface extends Component
             'match' => $this->activeCallSession->contact_id === $contactId,
         ]);
 
+        // CRITICAL: Force Livewire to refresh the view to ensure frontend gets the new call session
+        // This ensures the JavaScript uses the correct call session ID and contact info
+        $this->dispatch('callSessionUpdated', [
+            'callSessionId' => $this->activeCallSession->id,
+            'contactId' => $this->activeCallSession->contact_id,
+        ]);
+
         // Load transcripts and AI state for this specific call session
         $this->reloadTranscripts();
         $this->reloadAiState();

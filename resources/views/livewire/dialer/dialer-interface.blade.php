@@ -133,14 +133,33 @@
     @if ($activeCallSession)
         <div x-data x-init="(async function() {
             const callSessionId = {{ $activeCallSession->id }};
-            const expectedContactId = {{ $activeCallSession->contact_id }};
+            const expectedContactId = {{ $activeCallSession->contact_id ?? 'null' }};
             const initialContactId = {{ $initialContactId ?? 'null' }};
+            const callSessionStatus = {{ json_encode($activeCallSession->status) }};
+            const phoneNumberFromSession = {{ json_encode($activeCallSession->contact->phone ?? '') }};
+
+            // CRITICAL: Log initial values to debug
+            console.log('=== INITIAL VALUES ===');
+            console.log('Call Session ID:', callSessionId);
+            console.log('Expected Contact ID:', expectedContactId);
+            console.log('Phone Number from Session:', phoneNumberFromSession);
+            console.log('Call Session Status:', callSessionStatus);
+
+            // CRITICAL: Don't initialize calls for completed/failed sessions
+            if (['completed', 'failed', 'no_answer'].includes(callSessionStatus)) {
+                console.warn('Skipping call initialization for completed/failed session:', {
+                    callSessionId: callSessionId,
+                    status: callSessionStatus
+                });
+                return;
+            }
 
             // Verify the call session matches the expected contact
             console.log('Call initialization check', {
                 callSessionId: callSessionId,
                 callSessionContactId: expectedContactId,
                 initialContactId: initialContactId,
+                status: callSessionStatus,
                 match: initialContactId === null || expectedContactId === initialContactId
             });
 
@@ -153,6 +172,32 @@
                 alert('Error: Call session mismatch detected. The call session belongs to a different contact. Please try again.');
                 // Don't initialize call if there's a mismatch - let Livewire handle it
                 return;
+            }
+
+            // CRITICAL: Clear any existing call initialization if this is a different call session
+            // This prevents reusing old call sessions
+            if (window.activeCallInitialized && window.activeCallInitialized !== callSessionId) {
+                console.log('Clearing old call initialization:', {
+                    oldCallSessionId: window.activeCallInitialized,
+                    newCallSessionId: callSessionId
+                });
+                // Clean up old call if it exists
+                if (window.activeCall) {
+                    try {
+                        window.activeCall.disconnect();
+                    } catch (e) {
+                        console.warn('Error disconnecting old call:', e);
+                    }
+                    window.activeCall = null;
+                }
+                if (window.activeDevice) {
+                    try {
+                        window.activeDevice.destroy();
+                    } catch (e) {
+                        console.warn('Error destroying old device:', e);
+                    }
+                    window.activeDevice = null;
+                }
             }
 
             // Prevent multiple initializations for the same call session
@@ -201,15 +246,57 @@
 
             const { Device } = window.Twilio;
 
-            // Build TwiML URL with call session ID as query parameter
-            // This works with the Twilio Application Voice URL which points to /api/twilio/twiml
+            // Build TwiML URL with call session ID, contact ID, AND phone number as query parameters
+            // This ensures we always dial the correct number even if call session has wrong contact_id
             const baseUrl = window.location.origin;
-            const twimlUrl = `${baseUrl}/api/twilio/twiml?callSession=${callSessionId}`;
+            // Use phone number from session (already defined above)
+            const phoneNumber = phoneNumberFromSession || '';
+
+            // CRITICAL: Verify we have the required values
+            if (!expectedContactId || expectedContactId === null || expectedContactId === undefined || expectedContactId === 'null') {
+                console.error('CRITICAL: expectedContactId is missing or invalid!', {
+                    callSessionId: callSessionId,
+                    expectedContactId: expectedContactId,
+                    type: typeof expectedContactId
+                });
+                alert('Error: Contact ID is missing. Please try again.');
+                return;
+            }
+
+            if (!phoneNumber || phoneNumber.trim() === '') {
+                console.error('CRITICAL: Phone number is missing!', {
+                    callSessionId: callSessionId,
+                    expectedContactId: expectedContactId,
+                    phoneNumber: phoneNumber,
+                    phoneNumberFromSession: phoneNumberFromSession
+                });
+                alert('Error: Phone number is missing. Please try again.');
+                return;
+            }
+
+            // URL encode the phone number to handle special characters
+            const encodedPhone = encodeURIComponent(String(phoneNumber));
+            const twimlUrl = `${baseUrl}/api/twilio/twiml?callSession=${callSessionId}&contactId=${expectedContactId}&phoneNumber=${encodedPhone}`;
+
+            // CRITICAL: Verify URL was built correctly
+            if (!twimlUrl.includes('contactId=') || !twimlUrl.includes('phoneNumber=')) {
+                console.error('CRITICAL: TwiML URL is missing required parameters!', {
+                    twimlUrl: twimlUrl,
+                    hasContactId: twimlUrl.includes('contactId='),
+                    hasPhoneNumber: twimlUrl.includes('phoneNumber='),
+                    expectedContactId: expectedContactId,
+                    phoneNumber: phoneNumber
+                });
+                alert('Error: Failed to build call URL. Please try again.');
+                return;
+            }
 
             // CRITICAL: Log all values to verify they match
             console.log('=== CALL INITIALIZATION ===');
             console.log('Call Session ID:', callSessionId);
             console.log('Call Session Contact ID:', expectedContactId);
+            console.log('Phone Number:', phoneNumber);
+            console.log('Encoded Phone:', encodedPhone);
             console.log('Initial Contact ID:', initialContactId);
             console.log('TwiML URL:', twimlUrl);
             console.log('Match Check:', initialContactId === null || expectedContactId === initialContactId);
@@ -266,6 +353,9 @@
                     codecPreferences: ['opus', 'pcmu']
                 });
 
+                // CRITICAL: Store device in window for cleanup
+                window.activeDevice = device;
+
                 device.on('registered', () => {
                     console.log('Twilio Device registered');
                     updateCallStatus('Connecting...');
@@ -284,6 +374,9 @@
                 };
 
                 call = await device.connect({ params });
+
+                // CRITICAL: Store call in window for cleanup
+                window.activeCall = call;
 
                 call.on('accept', () => {
                     console.log('Call accepted', call);

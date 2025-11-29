@@ -72,22 +72,34 @@ class TwilioWebhookController extends Controller
             // 2. Query parameter: /api/twilio/twiml?callSession=31
             // 3. From 'To' parameter (when Twilio calls the Application Voice URL):
             //    The 'To' parameter contains the full URL like: https://.../api/twilio/twiml?callSession=32
+            $expectedContactId = null;
+
+            $phoneNumberFromUrl = null;
+
             if (! $callSessionId) {
                 // Try query parameter first
                 $callSessionId = $request->input('callSession') ?? $request->input('CallSession');
+                $expectedContactId = $request->input('contactId');
+                $phoneNumberFromUrl = $request->input('phoneNumber');
 
                 // If not found, try extracting from 'To' parameter
                 if (! $callSessionId) {
                     $toParam = $request->input('To');
                     if ($toParam) {
-                        // Parse the URL to extract callSession query parameter
+                        // Parse the URL to extract callSession, contactId, and phoneNumber query parameters
                         $parsedUrl = parse_url($toParam);
                         if (isset($parsedUrl['query'])) {
                             parse_str($parsedUrl['query'], $queryParams);
                             $callSessionId = $queryParams['callSession'] ?? null;
+                            $expectedContactId = $queryParams['contactId'] ?? null;
+                            $phoneNumberFromUrl = $queryParams['phoneNumber'] ?? null;
                         }
                     }
                 }
+            } else {
+                // If callSessionId came from route, try to get contactId and phoneNumber from query
+                $expectedContactId = $request->input('contactId');
+                $phoneNumberFromUrl = $request->input('phoneNumber');
             }
 
             // Convert to integer
@@ -122,15 +134,29 @@ class TwilioWebhookController extends Controller
                 return response($response->asXML(), 200)->header('Content-Type', 'text/xml');
             }
 
-            // CRITICAL: Get the contact directly from database to ensure we have the correct phone number
+            // CRITICAL: Use the expected contact_id from URL if provided, otherwise use call session's contact_id
+            // This ensures we always dial the correct number even if call session has wrong contact_id
+            $contactIdToUse = $expectedContactId ? (int) $expectedContactId : $callSessionData->contact_id;
+
+            if ($expectedContactId && (int) $expectedContactId !== $callSessionData->contact_id) {
+                Log::warning('CRITICAL: Call session contact_id mismatch with URL parameter', [
+                    'call_session_id' => $callSessionIdInt,
+                    'call_session_contact_id' => $callSessionData->contact_id,
+                    'expected_contact_id_from_url' => $expectedContactId,
+                    'using_contact_id' => $contactIdToUse,
+                ]);
+            }
+
+            // CRITICAL: Get the contact directly from database using the contact_id we determined
             $contactData = \Illuminate\Support\Facades\DB::table('contacts')
-                ->where('id', $callSessionData->contact_id)
+                ->where('id', $contactIdToUse)
                 ->first();
 
             if (! $contactData) {
-                Log::error('CRITICAL: Contact not found for call session', [
+                Log::error('CRITICAL: Contact not found', [
                     'call_session_id' => $callSessionIdInt,
-                    'contact_id' => $callSessionData->contact_id,
+                    'call_session_contact_id' => $callSessionData->contact_id,
+                    'requested_contact_id' => $contactIdToUse,
                 ]);
                 $response = new \Twilio\TwiML\VoiceResponse;
                 $response->say('Sorry, contact not found. Goodbye.', ['voice' => 'alice']);
@@ -138,48 +164,41 @@ class TwilioWebhookController extends Controller
                 return response($response->asXML(), 200)->header('Content-Type', 'text/xml');
             }
 
-            // Load the call session with contact using the ID from database
+            // Load the call session
             $callSession = CallSession::with('contact')->findOrFail($callSessionData->id);
 
-            // CRITICAL: Verify the contact_id matches what's in the database
-            if ($callSession->contact_id !== $callSessionData->contact_id) {
-                Log::error('CRITICAL: Call session contact_id mismatch between Eloquent and database', [
-                    'call_session_id' => $callSessionIdInt,
-                    'eloquent_contact_id' => $callSession->contact_id,
-                    'database_contact_id' => $callSessionData->contact_id,
-                ]);
-                // Use the database value instead
-                $callSession->contact_id = $callSessionData->contact_id;
-                $callSession->load('contact');
-            }
+            // CRITICAL: Determine the phone number to dial
+            // Priority: 1) phoneNumberFromUrl, 2) contactData from database
+            $phoneNumberToDial = $phoneNumberFromUrl ?: $contactData->phone;
 
-            // CRITICAL: Verify the contact phone matches what's in the database
-            $dbPhone = $contactData->phone ?? null;
-            $eloquentPhone = $callSession->contact->phone ?? null;
-
-            if ($dbPhone !== $eloquentPhone) {
-                Log::error('CRITICAL: Contact phone mismatch between Eloquent and database', [
-                    'call_session_id' => $callSessionIdInt,
-                    'contact_id' => $callSessionData->contact_id,
-                    'database_phone' => $dbPhone,
-                    'eloquent_phone' => $eloquentPhone,
-                ]);
-                // Use the database phone number
-                $callSession->contact->phone = $dbPhone;
+            // CRITICAL: Create a temporary contact object with the phone number we're going to dial
+            // This ensures TwilioService always uses the correct phone number
+            if ($phoneNumberFromUrl || $expectedContactId) {
+                // Use phone number from URL if provided, or use contact from database
+                $tempContact = new \App\Models\Contact;
+                $tempContact->phone = $phoneNumberToDial;
+                $tempContact->id = $contactIdToUse;
+                $callSession->setRelation('contact', $tempContact);
+            } else {
+                // Fallback: Override the contact relationship with the correct contact from database
+                $correctContact = \App\Models\Contact::find($contactIdToUse);
+                if ($correctContact) {
+                    $callSession->setRelation('contact', $correctContact);
+                }
             }
 
             // Log for debugging - CRITICAL for production debugging
             Log::info('TwiML requested', [
                 'requested_call_session_id' => $callSessionId,
                 'resolved_call_session_id' => $callSession->id,
-                'contact_id' => $callSession->contact_id,
-                'contact_id_from_db' => $callSessionData->contact_id,
-                'contact_phone' => $callSession->contact->phone ?? 'N/A',
-                'contact_phone_from_db' => $dbPhone ?? 'N/A',
-                'contact_name' => $callSession->contact->full_name ?? 'N/A',
+                'call_session_contact_id' => $callSessionData->contact_id,
+                'expected_contact_id_from_url' => $expectedContactId,
+                'contact_id_to_use' => $contactIdToUse,
+                'phone_number_from_url' => $phoneNumberFromUrl,
+                'phone_number_from_db' => $contactData->phone ?? null,
+                'phone_number_to_dial' => $phoneNumberToDial,
                 'va_user_id' => $callSession->va_user_id,
                 'status' => $callSession->status,
-                'phone_match' => $dbPhone === $eloquentPhone,
             ]);
 
             $twilioService = app(\App\Services\TwilioService::class);
