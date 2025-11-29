@@ -23,6 +23,29 @@ return new class extends Migration
                 $table->timestamps();
             });
         }
+
+        // Add foreign key constraint to contacts table now that campaigns exists
+        if (Schema::hasTable('contacts') && Schema::hasColumn('contacts', 'campaign_id')) {
+            try {
+                Schema::table('contacts', function (Blueprint $table) {
+                    $table->foreign('campaign_id')
+                        ->references('id')
+                        ->on('campaigns')
+                        ->nullOnDelete();
+                });
+            } catch (\Illuminate\Database\QueryException $e) {
+                // Ignore if foreign key already exists
+                $errorInfo = $e->errorInfo ?? [];
+                $errorCode = $errorInfo[1] ?? null;
+                $errorMessage = $e->getMessage();
+
+                if ($errorCode != 1826 &&
+                    ! str_contains($errorMessage, 'Duplicate key name') &&
+                    ! str_contains($errorMessage, 'already exists')) {
+                    throw $e;
+                }
+            }
+        }
     }
 
     /**
