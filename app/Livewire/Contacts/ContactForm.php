@@ -2,23 +2,31 @@
 
 namespace App\Livewire\Contacts;
 
-use App\Models\Contact;
 use App\Models\Campaign;
-use Livewire\Component;
+use App\Models\Contact;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Livewire\Component;
 
 class ContactForm extends Component
 {
     use AuthorizesRequests;
 
     public Contact $contact;
+
     public $campaign_id = null;
+
     public $first_name = '';
+
     public $last_name = '';
+
     public $phone = '';
+
     public $email = '';
+
     public $company = '';
+
     public $tags = '';
+
     public $timezone = '';
 
     public function mount($id = null): void
@@ -36,7 +44,7 @@ class ContactForm extends Component
             $this->tags = is_array($this->contact->tags) ? implode(', ', $this->contact->tags) : ($this->contact->tags ?? '');
             $this->timezone = $this->contact->timezone ?? '';
         } else {
-            $this->contact = new Contact();
+            $this->contact = new Contact;
         }
     }
 
@@ -58,7 +66,7 @@ class ContactForm extends Component
         ]);
 
         $tagsArray = [];
-        if (!empty($this->tags)) {
+        if (! empty($this->tags)) {
             $tagsArray = array_map('trim', explode(',', $this->tags));
             $tagsArray = array_filter($tagsArray);
         }

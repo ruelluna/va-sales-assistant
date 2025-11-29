@@ -12,6 +12,7 @@ class ContactImport extends Component
     use WithFileUploads;
 
     public Campaign $campaign;
+
     public $importFile;
 
     public function mount($id)
@@ -51,12 +52,13 @@ class ContactImport extends Component
         fclose($file);
 
         session()->flash('message', "Successfully imported {$imported} contacts.");
+
         return $this->redirect(route('campaigns.index'));
     }
 
     public function render()
     {
         return view('livewire.campaigns.contact-import')
-            ->layout('components.layouts.app', ['title' => 'Import Contacts - ' . $this->campaign->name]);
+            ->layout('components.layouts.app', ['title' => 'Import Contacts - '.$this->campaign->name]);
     }
 }

@@ -11,7 +11,7 @@ class SummaryPrompt
         $systemMessage .= "1. Summarize the call in 2-3 sentences.\n";
         $systemMessage .= "2. Decide the outcome label.\n";
         $systemMessage .= "3. Decide if follow-up is required and when.\n\n";
-        $systemMessage .= "Always respond in JSON only.";
+        $systemMessage .= 'Always respond in JSON only.';
 
         $userMessage = "Full transcript:\n{$transcript}\n\n";
         $userMessage .= "Campaign context:\n";

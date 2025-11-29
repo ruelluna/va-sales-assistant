@@ -2,10 +2,10 @@
 
 namespace App\Livewire\Dialer;
 
+use App\Events\CallTranscriptUpdated;
 use App\Models\CallSession;
 use App\Models\Campaign;
 use App\Models\Contact;
-use App\Services\TwilioService;
 use Livewire\Component;
 
 class DialerInterface extends Component
@@ -24,12 +24,23 @@ class DialerInterface extends Component
 
     public $initialContactId = null;
 
+    public bool $shouldMock = false;
+
     protected $listeners = [];
 
-    public function mount($embedded = false, $initialContactId = null)
+    private const MOCK_TRANSCRIPTS = [
+        ['speaker' => 'system', 'text' => 'Mock call connected.', 'timestamp' => 1],
+        ['speaker' => 'va', 'text' => 'Hi there, this is a mock VA checking in.', 'timestamp' => 3],
+        ['speaker' => 'prospect', 'text' => 'Hello! I can hear you loud and clear.', 'timestamp' => 5],
+        ['speaker' => 'va', 'text' => 'Great. This transcript only lives locally.', 'timestamp' => 7],
+        ['speaker' => 'prospect', 'text' => 'Perfect—looks like everything works.', 'timestamp' => 9],
+    ];
+
+    public function mount($embedded = false, $initialContactId = null, $shouldMock = false)
     {
         $this->embedded = $embedded;
         $this->initialContactId = $initialContactId ? (int) $initialContactId : null;
+        $this->shouldMock = (bool) $shouldMock;
 
         // Log for debugging
         \Illuminate\Support\Facades\Log::info('DialerInterface::mount called', [
@@ -59,6 +70,11 @@ class DialerInterface extends Component
                 ]);
                 $this->callContact((int) $contactId);
             }
+        }
+
+        if ($this->shouldMock && $this->activeCallSession) {
+            $this->sendMockTranscripts();
+            $this->shouldMock = false;
         }
     }
 
@@ -133,6 +149,11 @@ class DialerInterface extends Component
         $this->reloadTranscripts();
         $this->reloadAiState();
 
+        if ($this->shouldMock) {
+            $this->sendMockTranscripts();
+            $this->shouldMock = false;
+        }
+
         // Note: For browser-based calling, the frontend JavaScript initiates the call
         // via Twilio Device SDK. The TwiML URL is fetched by Twilio to get instructions
         // on how to handle the call (dial the phone number and stream audio).
@@ -191,16 +212,60 @@ class DialerInterface extends Component
         if ($this->activeCallSession) {
             $this->reloadTranscripts();
             $this->reloadAiState();
+
+            if ($this->shouldMock) {
+                $this->sendMockTranscripts();
+                $this->shouldMock = false;
+            }
         }
     }
 
+    /**
+     * Add a single transcript directly from event payload (fast, no DB query)
+     * This method prevents duplicates by checking if transcript already exists
+     */
+    public function addTranscript($speaker, $text, $timestamp): void
+    {
+        if (! $this->activeCallSession) {
+            return;
+        }
+
+        // Normalize timestamp to float for comparison
+        $timestamp = (float) ($timestamp ?? 0);
+
+        // Check if this transcript already exists (prevent duplicates)
+        $exists = false;
+        foreach ($this->transcripts as $existing) {
+            if (
+                ($existing['speaker'] ?? '') === $speaker &&
+                ($existing['text'] ?? '') === $text &&
+                abs(($existing['timestamp'] ?? 0) - $timestamp) < 0.1
+            ) {
+                $exists = true;
+                break;
+            }
+        }
+
+        if (! $exists) {
+            // Add transcript to array directly (faster than DB query)
+            $this->transcripts[] = [
+                'speaker' => $speaker,
+                'text' => $text,
+                'timestamp' => $timestamp,
+            ];
+
+            // Sort by timestamp to maintain order
+            usort($this->transcripts, function ($a, $b) {
+                return ($a['timestamp'] ?? 0) <=> ($b['timestamp'] ?? 0);
+            });
+        }
+    }
+
+    /**
+     * Reload all transcripts from database (used for initial load and fallback)
+     */
     public function reloadTranscripts()
     {
-        \Illuminate\Support\Facades\Log::info('reloadTranscripts called', [
-            'has_active_call_session' => $this->activeCallSession !== null,
-            'call_session_id' => $this->activeCallSession?->id,
-        ]);
-
         if ($this->activeCallSession) {
             // Refresh the call session to get latest data
             $this->activeCallSession = $this->activeCallSession->fresh(['contact']);
@@ -217,14 +282,9 @@ class DialerInterface extends Component
                 })
                 ->toArray();
 
-            \Illuminate\Support\Facades\Log::info('Transcripts reloaded', [
-                'call_session_id' => $this->activeCallSession->id,
-                'transcript_count' => count($transcripts),
-            ]);
-
+            // Reset and update transcripts to ensure Livewire detects the change
+            $this->transcripts = [];
             $this->transcripts = $transcripts;
-        } else {
-            \Illuminate\Support\Facades\Log::warning('reloadTranscripts called but no active call session');
         }
     }
 
@@ -283,17 +343,31 @@ class DialerInterface extends Component
         $this->callContact($contact->id);
     }
 
+    public function sendMockTranscripts(): void
+    {
+        if (app()->environment('production')) {
+            abort(403, 'Mock transcripts are disabled in production.');
+        }
+
+        if (! $this->activeCallSession) {
+            session()->flash('error', 'Start a call before sending mock transcripts.');
+
+            return;
+        }
+
+        foreach (self::MOCK_TRANSCRIPTS as $mockData) {
+            $transcript = $this->activeCallSession->transcripts()->create($mockData);
+            event(new CallTranscriptUpdated($this->activeCallSession, $transcript));
+        }
+
+        $this->reloadTranscripts();
+        session()->flash('success', 'Mock transcripts pushed to the call.');
+    }
+
     public function render()
     {
-        // Reload transcripts if we have an active call session
-        // This ensures transcripts are always up to date, even if Echo events fail
-        if ($this->activeCallSession) {
-            // Only reload if we don't already have transcripts loaded
-            // This prevents unnecessary database queries on every render
-            if (empty($this->transcripts)) {
-                $this->reloadTranscripts();
-            }
-        }
+        // Note: wire:poll handles transcript reloading automatically
+        // This method just renders the view with current state
 
         $view = view('livewire.dialer.dialer-interface', [
             'campaigns' => Campaign::where('status', 'active')->get(),

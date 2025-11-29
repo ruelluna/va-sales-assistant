@@ -18,7 +18,7 @@
                                         id="call-status">{{ ucfirst(str_replace('_', ' ', $activeCallSession->status)) }}</span>
                                 </p>
                             </div>
-                            <div class="flex gap-4">
+                            <div class="flex flex-wrap gap-4">
                                 <button id="mute-btn"
                                     class="bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 px-4 py-2 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600 cursor-pointer">
                                     Mute
@@ -33,14 +33,56 @@
                         <div
                             class="bg-white dark:bg-zinc-900 rounded-lg shadow border border-zinc-200 dark:border-zinc-700 p-6">
                             <h2 class="text-lg font-semibold mb-4">Transcript</h2>
-                            <div id="transcript-panel" class="h-96 overflow-y-auto space-y-2">
-                                @foreach ($transcripts as $transcript)
+                            <div id="transcript-panel" wire:poll.10s="reloadTranscripts"
+                                class="h-96 overflow-y-auto space-y-3 p-2">
+                                @forelse ($transcripts as $index => $transcript)
+                                    @php
+                                        $isVa = $transcript['speaker'] === 'va';
+                                        $isSystem = $transcript['speaker'] === 'system';
+                                    @endphp
+                                    @if ($isSystem)
+                                        {{-- System messages centered --}}
+                                        <div wire:key="transcript-system-{{ $index }}-{{ $transcript['timestamp'] }}"
+                                            class="flex justify-center">
+                                            <div
+                                                class="px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-sm">
+                                                {{ $transcript['text'] }}
+                                            </div>
+                                        </div>
+                                    @else
+                                        {{-- Chat-like messages: VA on right, Prospect on left --}}
+                                        <div wire:key="transcript-{{ $transcript['speaker'] }}-{{ $index }}-{{ $transcript['timestamp'] }}"
+                                            class="flex {{ $isVa ? 'justify-end' : 'justify-start' }}">
+                                            <div
+                                                class="max-w-[75%] flex gap-2 {{ $isVa ? 'flex-row-reverse' : 'flex-row' }}">
+                                                {{-- Avatar --}}
+                                                <div
+                                                    class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold {{ $isVa ? 'bg-blue-500 text-white' : 'bg-zinc-500 text-white' }}">
+                                                    {{ $isVa ? 'VA' : 'P' }}
+                                                </div>
+                                                {{-- Message bubble --}}
+                                                <div class="flex flex-col {{ $isVa ? 'items-end' : 'items-start' }}">
+                                                    <div
+                                                        class="px-4 py-2 rounded-lg {{ $isVa ? 'bg-blue-500 text-white rounded-br-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-sm' }}">
+                                                        <p class="text-sm whitespace-pre-wrap break-words">
+                                                            {{ $transcript['text'] }}</p>
+                                                    </div>
+                                                    @if (isset($transcript['timestamp']))
+                                                        <span
+                                                            class="text-xs text-zinc-500 dark:text-zinc-400 mt-1 px-1">
+                                                            {{ gmdate('H:i:s', (int) $transcript['timestamp']) }}
+                                                        </span>
+                                                    @endif
+                                                </div>
+                                            </div>
+                                        </div>
+                                    @endif
+                                @empty
                                     <div
-                                        class="p-2 rounded {{ $transcript['speaker'] === 'va' ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-zinc-50 dark:bg-zinc-800' }}">
-                                        <strong>{{ $transcript['speaker'] === 'va' ? 'VA' : 'Prospect' }}:</strong>
-                                        {{ $transcript['text'] }}
+                                        class="flex items-center justify-center h-full text-zinc-500 dark:text-zinc-400">
+                                        <p>No transcript yet. Waiting for conversation...</p>
                                     </div>
-                                @endforeach
+                                @endforelse
                             </div>
                         </div>
                     @else
@@ -302,6 +344,21 @@
                     }
                 }
 
+                function scrollTranscriptToBottom() {
+                    const transcriptPanel = document.getElementById('transcript-panel');
+                    if (transcriptPanel) {
+                        transcriptPanel.scrollTo({
+                            top: transcriptPanel.scrollHeight,
+                            behavior: 'smooth'
+                        });
+                    }
+                }
+
+                // Auto-scroll on initial load
+                setTimeout(() => {
+                    scrollTranscriptToBottom();
+                }, 500);
+
                 function cleanup() {
                     if (device) {
                         device.destroy();
@@ -321,19 +378,92 @@
                         channel.listen('.transcript.updated', (e) => {
                             console.log('Transcript updated event received:', e);
                             const component = getLivewireComponent();
-                            if (component) {
-                                console.log('Calling reloadTranscripts on component');
-                                component.call('reloadTranscripts').then(() => {
-                                    console.log('reloadTranscripts completed, refreshing component');
-                                    refreshComponent();
-                                }).catch((error) => {
-                                    console.error('Error calling reloadTranscripts:', error);
-                                    refreshComponent();
-                                });
-                            } else {
-                                console.warn('No Livewire component found, just refreshing');
-                                refreshComponent();
+
+                            // Validate event data
+                            if (!e || typeof e !== 'object') {
+                                console.warn('Invalid event data received:', e);
+                                return;
                             }
+
+                            if (component && e.speaker && e.text !== undefined && e.text !== null && e.text !== '') {
+                                // Fast path: directly add transcript from event payload (no DB query)
+                                console.log('Adding transcript directly from event:', {
+                                    speaker: e.speaker,
+                                    text: e.text.substring(0, 50) + '...',
+                                    timestamp: e.timestamp
+                                });
+
+                                component.call('addTranscript', e.speaker, e.text, e.timestamp || 0)
+                                    .then(() => {
+                                        console.log('Transcript added successfully');
+                                        refreshComponent();
+                                        // Auto-scroll to bottom after new transcript
+                                        setTimeout(() => {
+                                            scrollTranscriptToBottom();
+                                        }, 100);
+                                    })
+                                    .catch((error) => {
+                                        console.error('Error adding transcript, falling back to reload:', error);
+                                        // Fallback to reload if direct add fails
+                                        if (component) {
+                                            component.call('reloadTranscripts')
+                                                .then(() => {
+                                                    refreshComponent();
+                                                    setTimeout(() => {
+                                                        scrollTranscriptToBottom();
+                                                    }, 100);
+                                                })
+                                                .catch((reloadError) => {
+                                                    console.error('Error reloading transcripts:', reloadError);
+                                                    refreshComponent();
+                                                });
+                                        } else {
+                                            refreshComponent();
+                                        }
+                                    });
+                            } else {
+                                // Fallback: reload all transcripts if event data is incomplete
+                                console.warn('Event data incomplete, reloading all transcripts', {
+                                    hasComponent: !!component,
+                                    hasSpeaker: !!e.speaker,
+                                    hasText: e.text !== undefined,
+                                    textValue: e.text
+                                });
+
+                                if (component) {
+                                    component.call('reloadTranscripts')
+                                        .then(() => {
+                                            refreshComponent();
+                                            setTimeout(() => {
+                                                scrollTranscriptToBottom();
+                                            }, 100);
+                                        })
+                                        .catch((error) => {
+                                            console.error('Error reloading transcripts:', error);
+                                            refreshComponent();
+                                        });
+                                } else {
+                                    console.warn('No Livewire component found, refreshing page');
+                                    refreshComponent();
+                                }
+                            }
+                        });
+
+                        // Log when channel is subscribed
+                        channel.subscribed(() => {
+                            console.log('Echo channel subscribed successfully for call session:', callSessionId);
+                            // Reload transcripts once when channel is ready to ensure we have latest
+                            const component = getLivewireComponent();
+                            if (component) {
+                                component.call('reloadTranscripts').catch(err => {
+                                    console.error('Error reloading transcripts on channel subscribe:', err);
+                                });
+                            }
+                        });
+
+                        // Log subscription errors
+                        channel.error((error) => {
+                            console.error('Echo channel subscription error:', error);
                         });
 
                         channel.listen('.ai.suggestion.updated', (e) => {
@@ -355,11 +485,20 @@
                             if (component) {
                                 component.call('reloadTranscripts').then(() => {
                                     refreshComponent();
+                                    setTimeout(() => {
+                                        scrollTranscriptToBottom();
+                                    }, 100);
                                 }).catch(() => {
                                     refreshComponent();
+                                    setTimeout(() => {
+                                        scrollTranscriptToBottom();
+                                    }, 100);
                                 });
                             } else {
                                 refreshComponent();
+                                setTimeout(() => {
+                                    scrollTranscriptToBottom();
+                                }, 100);
                             }
                         }, 3000);
 
@@ -378,11 +517,20 @@
                         if (component) {
                             component.call('reloadTranscripts').then(() => {
                                 refreshComponent();
+                                setTimeout(() => {
+                                    scrollTranscriptToBottom();
+                                }, 100);
                             }).catch(() => {
                                 refreshComponent();
+                                setTimeout(() => {
+                                    scrollTranscriptToBottom();
+                                }, 100);
                             });
                         } else {
                             refreshComponent();
+                            setTimeout(() => {
+                                scrollTranscriptToBottom();
+                            }, 100);
                         }
                     }, 3000);
 

@@ -86,6 +86,7 @@ class TwilioService
             $start = $response->start();
             $stream = $start->stream([
                 'url' => $streamUrl,
+                'track' => 'both_tracks', // Receive both inbound (agent) and outbound (prospect) audio tracks
             ]);
 
             // Add Parameter elements to Stream

@@ -3,8 +3,8 @@
 namespace Database\Factories;
 
 use App\Models\CallSession;
-use App\Models\Contact;
 use App\Models\Campaign;
+use App\Models\Contact;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -18,7 +18,7 @@ class CallSessionFactory extends Factory
             'contact_id' => Contact::factory(),
             'campaign_id' => Campaign::factory(),
             'va_user_id' => User::factory(),
-            'twilio_call_sid' => 'CA' . fake()->numerify('##########'),
+            'twilio_call_sid' => 'CA'.fake()->numerify('##########'),
             'direction' => 'outbound',
             'status' => 'initiated',
             'started_at' => null,

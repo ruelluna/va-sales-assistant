@@ -18,7 +18,7 @@
         </div>
         <div class="p-6">
             @if ($show && $contactId)
-                @livewire('dialer.dialer-interface', ['embedded' => true, 'initialContactId' => $contactId], key('dialer-interface-' . $contactId . '-' . now()->timestamp))
+                @livewire('dialer.dialer-interface', ['embedded' => true, 'initialContactId' => $contactId, 'shouldMock' => $this->shouldMock], key('dialer-interface-' . $contactId . '-' . now()->timestamp))
             @endif
         </div>
     </div>

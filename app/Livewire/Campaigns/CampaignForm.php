@@ -9,12 +9,19 @@ use Livewire\Component;
 class CampaignForm extends Component
 {
     public Campaign $campaign;
+
     public $name = '';
+
     public $product_id = null;
+
     public $product_name = '';
+
     public $script = '';
+
     public $ai_prompt_context = '';
+
     public $success_definition = '';
+
     public $status = 'draft';
 
     public function mount($id = null)
@@ -29,7 +36,7 @@ class CampaignForm extends Component
             $this->success_definition = $this->campaign->success_definition;
             $this->status = $this->campaign->status;
         } else {
-            $this->campaign = new Campaign();
+            $this->campaign = new Campaign;
         }
     }
 

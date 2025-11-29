@@ -10,12 +10,15 @@ class DialerModal extends Component
 
     public $contactId = null;
 
+    public bool $shouldMock = false;
+
     protected $listeners = ['openDialer', 'closeDialer'];
 
-    public function openDialer($contactId = null): void
+    public function openDialer($contactId = null, $shouldMock = false): void
     {
         // Handle Livewire 3 named parameters - they come as an array
         if (is_array($contactId)) {
+            $shouldMock = $contactId['shouldMock'] ?? false;
             $contactId = $contactId['contactId'] ?? $contactId[0] ?? null;
         }
 
@@ -27,9 +30,11 @@ class DialerModal extends Component
             'received_contactId' => $contactId,
             'parsed_contactId' => $newContactId,
             'previous_contactId' => $this->contactId,
+            'should_mock' => (bool) $shouldMock,
         ]);
 
         $this->contactId = $newContactId;
+        $this->shouldMock = (bool) $shouldMock;
         $this->show = true;
     }
 
@@ -37,6 +42,7 @@ class DialerModal extends Component
     {
         $this->show = false;
         $this->contactId = null;
+        $this->shouldMock = false;
     }
 
     public function render()

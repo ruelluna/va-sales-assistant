@@ -8,22 +8,34 @@ use Livewire\Component;
 class ProductForm extends Component
 {
     public Product $product;
+
     public $name = '';
+
     public $description = '';
+
     public $features = [];
+
     public $pricing_info = '';
+
     public $ai_prompt_context = '';
+
     public $common_objections = [];
+
     public $recommended_responses = [];
+
     public $cold_call_script_template = '';
+
     public $success_definition = '';
+
     public $status = 'active';
+
     public $newFeature = '';
+
     public $newObjection = ['type' => '', 'objection' => '', 'response' => ''];
 
     public function mount($id = null)
     {
-        if (!auth()->user()->can($id ? 'edit products' : 'create products')) {
+        if (! auth()->user()->can($id ? 'edit products' : 'create products')) {
             abort(403);
         }
 
@@ -40,7 +52,7 @@ class ProductForm extends Component
             $this->success_definition = $this->product->success_definition ?? '';
             $this->status = $this->product->status;
         } else {
-            $this->product = new Product();
+            $this->product = new Product;
         }
     }
 

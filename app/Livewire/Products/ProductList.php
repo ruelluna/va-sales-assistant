@@ -11,12 +11,13 @@ class ProductList extends Component
     use WithPagination;
 
     public $search = '';
+
     public $statusFilter = '';
 
     public function mount()
     {
         // Check permission
-        if (!auth()->user()->can('view products')) {
+        if (! auth()->user()->can('view products')) {
             abort(403);
         }
     }
@@ -34,8 +35,8 @@ class ProductList extends Component
 
         if ($this->search) {
             $query->where(function ($q) {
-                $q->where('name', 'like', '%' . $this->search . '%')
-                    ->orWhere('description', 'like', '%' . $this->search . '%');
+                $q->where('name', 'like', '%'.$this->search.'%')
+                    ->orWhere('description', 'like', '%'.$this->search.'%');
             });
         }
 

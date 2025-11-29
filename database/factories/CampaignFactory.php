@@ -12,8 +12,8 @@ class CampaignFactory extends Factory
     public function definition(): array
     {
         return [
-            'name' => fake()->words(3, true) . ' Campaign',
-            'product_name' => fake()->productName(),
+            'name' => fake()->words(3, true).' Campaign',
+            'product_name' => fake()->words(2, true).' Product',
             'script' => fake()->paragraphs(3, true),
             'ai_prompt_context' => fake()->paragraph(),
             'success_definition' => fake()->sentence(),

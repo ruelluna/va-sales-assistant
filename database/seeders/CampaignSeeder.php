@@ -14,6 +14,7 @@ class CampaignSeeder extends Seeder
 
         if ($products->isEmpty()) {
             $this->command->warn('No products found. Please run ProductSeeder first.');
+
             return;
         }
 
@@ -24,7 +25,7 @@ class CampaignSeeder extends Seeder
                 'script' => 'Focus on pain points: data scattered across tools, missing follow-ups, lack of sales visibility.',
                 'ai_prompt_context' => 'This campaign targets businesses with 10-50 employees. Emphasize ROI and time savings.',
                 'success_definition' => 'Booked demo or expressed strong interest in learning more',
-                'status' => 'active'
+                'status' => 'active',
             ],
             [
                 'name' => 'Marketing Automation Spring Push',
@@ -32,7 +33,7 @@ class CampaignSeeder extends Seeder
                 'script' => 'Highlight automation benefits: save 10+ hours per week, nurture leads automatically, track ROI.',
                 'ai_prompt_context' => 'Target marketing managers and business owners. Focus on scalability and efficiency.',
                 'success_definition' => 'Qualified lead or demo scheduled',
-                'status' => 'active'
+                'status' => 'active',
             ],
             [
                 'name' => 'Project Management Beta',
@@ -40,7 +41,7 @@ class CampaignSeeder extends Seeder
                 'script' => 'Emphasize team collaboration, deadline tracking, and visibility into project status.',
                 'ai_prompt_context' => 'Target project managers and team leads. Address common concerns about adoption and complexity.',
                 'success_definition' => 'Demo scheduled or trial signup',
-                'status' => 'draft'
+                'status' => 'draft',
             ],
             [
                 'name' => 'CRM Enterprise Outreach',
@@ -48,8 +49,8 @@ class CampaignSeeder extends Seeder
                 'script' => 'Focus on enterprise features: advanced reporting, API access, dedicated support.',
                 'ai_prompt_context' => 'Target larger companies (50+ employees). Emphasize scalability and enterprise support.',
                 'success_definition' => 'Enterprise demo or sales conversation',
-                'status' => 'active'
-            ]
+                'status' => 'active',
+            ],
         ];
 
         foreach ($campaigns as $campaignData) {

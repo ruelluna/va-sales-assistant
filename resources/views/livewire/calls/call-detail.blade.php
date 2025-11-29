@@ -44,17 +44,43 @@
 
                 <div class="bg-white dark:bg-zinc-900 rounded-lg shadow border border-zinc-200 dark:border-zinc-700 p-6">
                     <h2 class="text-lg font-semibold mb-4">Transcript</h2>
-                    <div class="space-y-3 max-h-96 overflow-y-auto">
+                    <div class="space-y-3 max-h-96 overflow-y-auto p-2">
                         @forelse($callSession->transcripts as $transcript)
-                            <div class="p-3 rounded {{ $transcript->speaker === 'va' ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-zinc-50 dark:bg-zinc-800' }}">
-                                <div class="flex items-center justify-between mb-1">
-                                    <span class="text-sm font-medium">{{ ucfirst($transcript->speaker) }}</span>
-                                    <span class="text-xs text-zinc-500 dark:text-zinc-400">{{ gmdate('H:i:s', (int)$transcript->timestamp) }}</span>
+                            @php
+                                $isVa = $transcript->speaker === 'va';
+                                $isSystem = $transcript->speaker === 'system';
+                            @endphp
+                            @if ($isSystem)
+                                {{-- System messages centered --}}
+                                <div class="flex justify-center">
+                                    <div class="px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-sm">
+                                        {{ $transcript->text }}
+                                    </div>
                                 </div>
-                                <p class="text-zinc-700 dark:text-zinc-300">{{ $transcript->text }}</p>
-                            </div>
+                            @else
+                                {{-- Chat-like messages: VA on right, Prospect on left --}}
+                                <div class="flex {{ $isVa ? 'justify-end' : 'justify-start' }}">
+                                    <div class="max-w-[75%] flex gap-2 {{ $isVa ? 'flex-row-reverse' : 'flex-row' }}">
+                                        {{-- Avatar --}}
+                                        <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold {{ $isVa ? 'bg-blue-500 text-white' : 'bg-zinc-500 text-white' }}">
+                                            {{ $isVa ? 'VA' : 'P' }}
+                                        </div>
+                                        {{-- Message bubble --}}
+                                        <div class="flex flex-col {{ $isVa ? 'items-end' : 'items-start' }}">
+                                            <div class="px-4 py-2 rounded-lg {{ $isVa ? 'bg-blue-500 text-white rounded-br-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-sm' }}">
+                                                <p class="text-sm whitespace-pre-wrap break-words">{{ $transcript->text }}</p>
+                                            </div>
+                                            <span class="text-xs text-zinc-500 dark:text-zinc-400 mt-1 px-1">
+                                                {{ gmdate('H:i:s', (int)$transcript->timestamp) }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
                         @empty
-                            <p class="text-zinc-500 dark:text-zinc-400">No transcript available</p>
+                            <div class="flex items-center justify-center h-full text-zinc-500 dark:text-zinc-400">
+                                <p>No transcript available</p>
+                            </div>
                         @endforelse
                     </div>
                 </div>

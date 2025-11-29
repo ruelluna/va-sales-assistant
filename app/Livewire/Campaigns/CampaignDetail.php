@@ -23,6 +23,25 @@ class CampaignDetail extends Component
 
     public $callingContactId = null;
 
+    public function mockCall($contactId): void
+    {
+        if (app()->environment('production')) {
+            session()->flash('error', 'Mock calls are disabled in production.');
+
+            return;
+        }
+
+        $contact = Contact::with('campaign')->findOrFail((int) $contactId);
+
+        if (! $contact->campaign_id || ! $contact->campaign || $contact->campaign->status !== 'active') {
+            session()->flash('error', 'Contact must be assigned to an active campaign to mock call.');
+
+            return;
+        }
+
+        $this->dispatch('openDialer', contactId: $contact->id, shouldMock: true);
+    }
+
     public function mount($id): void
     {
         $this->campaign = Campaign::with(['product'])->findOrFail($id);

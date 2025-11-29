@@ -2,20 +2,24 @@
 
 namespace App\Livewire\Contacts;
 
-use App\Models\Contact;
 use App\Models\Campaign;
+use App\Models\Contact;
 use Livewire\Component;
-use Livewire\WithPagination;
 use Livewire\WithFileUploads;
+use Livewire\WithPagination;
 
 class ContactList extends Component
 {
-    use WithPagination, WithFileUploads;
+    use WithFileUploads, WithPagination;
 
     public $search = '';
+
     public $campaignFilter = '';
+
     public $showImportModal = false;
+
     public $importFile;
+
     public $importCampaignId;
 
     public function import()
@@ -56,13 +60,14 @@ class ContactList extends Component
         $contact = Contact::with('campaign')->findOrFail($id);
 
         // Check if contact has an active campaign
-        if (!$contact->campaign_id || !$contact->campaign || $contact->campaign->status !== 'active') {
+        if (! $contact->campaign_id || ! $contact->campaign || $contact->campaign->status !== 'active') {
             session()->flash('error', 'Contact must be assigned to an active campaign to call.');
+
             return;
         }
 
         // Redirect to dialer with contact ID as query parameter
-        return $this->redirect(route('dialer') . '?contact=' . $id);
+        return $this->redirect(route('dialer').'?contact='.$id);
     }
 
     public function delete($id)
@@ -77,10 +82,10 @@ class ContactList extends Component
 
         if ($this->search) {
             $query->where(function ($q) {
-                $q->where('first_name', 'like', '%' . $this->search . '%')
-                    ->orWhere('last_name', 'like', '%' . $this->search . '%')
-                    ->orWhere('phone', 'like', '%' . $this->search . '%')
-                    ->orWhere('email', 'like', '%' . $this->search . '%');
+                $q->where('first_name', 'like', '%'.$this->search.'%')
+                    ->orWhere('last_name', 'like', '%'.$this->search.'%')
+                    ->orWhere('phone', 'like', '%'.$this->search.'%')
+                    ->orWhere('email', 'like', '%'.$this->search.'%');
             });
         }
 

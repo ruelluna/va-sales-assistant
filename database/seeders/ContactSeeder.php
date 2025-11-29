@@ -14,6 +14,7 @@ class ContactSeeder extends Seeder
 
         if ($campaigns->isEmpty()) {
             $this->command->warn('No campaigns found. Please run CampaignSeeder first.');
+
             return;
         }
 

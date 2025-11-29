@@ -1,12 +1,11 @@
 <?php
 
 use App\Models\CallSession;
-use App\Models\Contact;
 use App\Models\Campaign;
+use App\Models\Contact;
 use App\Models\User;
 
 use function Pest\Laravel\actingAs;
-use function Pest\Laravel\postJson;
 
 test('can create a call session', function () {
     $user = User::factory()->create(['role' => 'va']);

@@ -13,7 +13,7 @@ class SuggestionPrompt
         $systemMessage .= "3. Suggest a short, natural reply the VA can say next.\n\n";
         $systemMessage .= "Always respond in JSON only. Keep the suggested reply concise and speakable.\n\n";
         $systemMessage .= "Valid conversation states: greeting, rapport, pitch, objection, busy, follow_up_request, closing, wrap_up\n";
-        $systemMessage .= "Valid flags: interested, not_interested, price_objection, time_objection, needs_callback, gatekeeper";
+        $systemMessage .= 'Valid flags: interested, not_interested, price_objection, time_objection, needs_callback, gatekeeper';
 
         $userMessage = "Recent transcript:\n{$transcript}\n\n";
         $userMessage .= "Campaign context:\n";
