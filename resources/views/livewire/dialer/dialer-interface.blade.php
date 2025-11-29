@@ -205,9 +205,25 @@
             // This works with the Twilio Application Voice URL which points to /api/twilio/twiml
             const baseUrl = window.location.origin;
             const twimlUrl = `${baseUrl}/api/twilio/twiml?callSession=${callSessionId}`;
-            console.log('TwiML URL:', twimlUrl);
+
+            // CRITICAL: Log all values to verify they match
+            console.log('=== CALL INITIALIZATION ===');
             console.log('Call Session ID:', callSessionId);
-            console.log('Expected Contact ID:', {{ $activeCallSession->contact_id }});
+            console.log('Call Session Contact ID:', expectedContactId);
+            console.log('Initial Contact ID:', initialContactId);
+            console.log('TwiML URL:', twimlUrl);
+            console.log('Match Check:', initialContactId === null || expectedContactId === initialContactId);
+
+            // CRITICAL: Verify the call session ID matches what we expect
+            if (initialContactId !== null && expectedContactId !== initialContactId) {
+                console.error('CRITICAL: Call session contact ID mismatch - aborting call', {
+                    callSessionId: callSessionId,
+                    callSessionContactId: expectedContactId,
+                    initialContactId: initialContactId,
+                });
+                alert('Error: Call session mismatch detected. The call session belongs to a different contact. Please try again.');
+                return;
+            }
 
             const componentId = '{{ $this->getId() }}';
             let device = null;

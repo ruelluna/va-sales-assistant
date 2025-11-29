@@ -190,25 +190,37 @@ class DialerInterface extends Component
             return;
         }
 
-        $callSession = CallSession::create([
+        // CRITICAL: Log exactly what we're about to create
+        $callSessionData = [
             'contact_id' => $contact->id,
             'campaign_id' => $contact->campaign_id,
             'va_user_id' => auth()->id(),
             'twilio_call_sid' => null,
             'direction' => 'outbound',
             'status' => 'initiated',
+        ];
+
+        \Illuminate\Support\Facades\Log::info('About to create call session', [
+            'data' => $callSessionData,
+            'contact_id_from_contact' => $contact->id,
+            'requested_contact_id' => $contactId,
+            'match' => $contact->id === $contactId,
         ]);
 
-        // CRITICAL: Immediately refresh from database to verify it was created correctly
-        $callSession->refresh();
+        // CRITICAL: Use DB::table to ensure we're creating with the exact values we want
+        $callSessionId = \Illuminate\Support\Facades\DB::table('call_sessions')->insertGetId($callSessionData);
 
-        // Verify the call session was created with the correct contact_id
+        // Load the created call session
+        $callSession = CallSession::with('contact')->findOrFail($callSessionId);
+
+        // CRITICAL: Immediately verify it was created correctly
         if ($callSession->contact_id !== $contactId) {
             \Illuminate\Support\Facades\Log::error('CRITICAL: Call session created with wrong contact_id', [
                 'expected_contact_id' => $contactId,
                 'actual_contact_id' => $callSession->contact_id,
                 'call_session_id' => $callSession->id,
                 'contact_phone_requested' => $contact->phone,
+                'contact_phone_in_db' => $callSession->contact->phone ?? 'N/A',
             ]);
 
             // Delete the incorrectly created call session
@@ -226,9 +238,40 @@ class DialerInterface extends Component
             'expected_contact_id' => $contactId,
         ]);
 
-        // Load the call session with contact relationship to ensure phone number is available
+        // CRITICAL: Load the call session DIRECTLY by ID - don't use loadActiveCall() which might find a different session
         // Use fresh() to ensure we get the latest data from database
         $this->activeCallSession = CallSession::with('contact')->findOrFail($callSession->id);
+
+        // CRITICAL: Verify the loaded call session matches what we just created
+        if ($this->activeCallSession->id !== $callSession->id) {
+            \Illuminate\Support\Facades\Log::error('CRITICAL: Wrong call session loaded', [
+                'expected_call_session_id' => $callSession->id,
+                'loaded_call_session_id' => $this->activeCallSession->id,
+                'expected_contact_id' => $contactId,
+                'loaded_contact_id' => $this->activeCallSession->contact_id,
+            ]);
+            // Delete the wrong session and try again
+            $this->activeCallSession->delete();
+            session()->flash('error', 'Error loading call session. Please try again.');
+
+            return;
+        }
+
+        // CRITICAL: Verify the contact_id matches what we expect
+        if ($this->activeCallSession->contact_id !== $contactId) {
+            \Illuminate\Support\Facades\Log::error('CRITICAL: Call session has wrong contact_id after loading', [
+                'call_session_id' => $this->activeCallSession->id,
+                'expected_contact_id' => $contactId,
+                'actual_contact_id' => $this->activeCallSession->contact_id,
+                'expected_phone' => $contact->phone,
+                'actual_phone' => $this->activeCallSession->contact->phone ?? 'N/A',
+            ]);
+            // Delete the wrong session and try again
+            $this->activeCallSession->delete();
+            session()->flash('error', 'Call session has wrong contact. Please try again.');
+
+            return;
+        }
 
         // Double-verify the contact phone number matches what we expect
         $loadedContactPhone = $this->activeCallSession->contact->phone ?? null;
@@ -247,6 +290,8 @@ class DialerInterface extends Component
             'contact_id' => $this->activeCallSession->contact_id,
             'contact_phone' => $this->activeCallSession->contact->phone ?? 'N/A',
             'contact_name' => $this->activeCallSession->contact->full_name ?? 'N/A',
+            'expected_contact_id' => $contactId,
+            'match' => $this->activeCallSession->contact_id === $contactId,
         ]);
 
         // Load transcripts and AI state for this specific call session
@@ -266,9 +311,25 @@ class DialerInterface extends Component
     public function updateCallSid($callSid)
     {
         if ($this->activeCallSession) {
+            $currentCallSessionId = $this->activeCallSession->id;
+            $currentContactId = $this->activeCallSession->contact_id;
+
             $this->activeCallSession->update(['twilio_call_sid' => $callSid]);
-            $this->activeCallSession = $this->activeCallSession->fresh();
-            $this->loadActiveCall();
+            $this->activeCallSession = $this->activeCallSession->fresh(['contact']);
+
+            // CRITICAL: Verify we're still using the same call session
+            if ($this->activeCallSession->id !== $currentCallSessionId) {
+                \Illuminate\Support\Facades\Log::error('CRITICAL: Call session changed after updateCallSid', [
+                    'expected_call_session_id' => $currentCallSessionId,
+                    'actual_call_session_id' => $this->activeCallSession->id,
+                    'expected_contact_id' => $currentContactId,
+                    'actual_contact_id' => $this->activeCallSession->contact_id,
+                ]);
+                // Reload the correct call session
+                $this->activeCallSession = CallSession::with('contact')->findOrFail($currentCallSessionId);
+            }
+
+            // Don't call loadActiveCall() here - it might find a different call session
         }
     }
 
