@@ -46,8 +46,10 @@ class TwilioService
         // CRITICAL: DO NOT refresh the contact relationship here!
         // The TwilioWebhookController already sets the correct contact with setRelation()
         // Refreshing would reload the wrong contact from the database
-        // Only refresh if contact is not already loaded
-        if (! $callSession->relationLoaded('contact')) {
+        // If contact is not loaded, try to load it, but ONLY if it's not already set
+        // This prevents overwriting a temp contact that was set by TwilioWebhookController
+        if (! $callSession->relationLoaded('contact') && ! $callSession->contact) {
+            // Only load if contact doesn't exist at all
             $callSession = $callSession->fresh(['contact']);
         }
 
@@ -62,15 +64,30 @@ class TwilioService
         }
 
         // Log the contact details being used for TwiML generation
-        $contactPhone = $callSession->contact ? ($callSession->contact->phone ?? null) : null;
-        $contactIdFromRelation = $callSession->contact ? ($callSession->contact->id ?? null) : null;
+        // CRITICAL: Access contact safely to avoid lazy loading
+        $contactPhone = null;
+        $contactIdFromRelation = null;
+        $contactName = null;
+
+        if ($callSession->relationLoaded('contact') && $callSession->contact) {
+            // Relation is loaded, use it directly
+            $contactPhone = $callSession->contact->phone ?? null;
+            $contactIdFromRelation = $callSession->contact->id ?? null;
+            $contactName = $callSession->contact->full_name ?? null;
+        } elseif ($callSession->contact) {
+            // Contact exists but relation might not be marked as loaded
+            // This shouldn't happen, but handle it safely
+            $contactPhone = $callSession->contact->phone ?? null;
+            $contactIdFromRelation = $callSession->contact->id ?? null;
+            $contactName = $callSession->contact->full_name ?? null;
+        }
 
         Log::info('Generating TwiML with contact details', [
             'call_session_id' => $callSession->id,
             'call_session_contact_id' => $callSession->contact_id,
             'contact_id_from_relation' => $contactIdFromRelation,
             'contact_phone' => $contactPhone ?? 'N/A',
-            'contact_name' => $callSession->contact->full_name ?? 'N/A',
+            'contact_name' => $contactName ?? 'N/A',
             'contact_loaded_from' => $callSession->relationLoaded('contact') ? 'relation' : 'database',
             'contact_exists' => $callSession->contact !== null,
         ]);
@@ -91,16 +108,46 @@ class TwilioService
         // Remove all Unicode directional formatting characters
         $phoneNumber = preg_replace('/[\x{200E}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $phoneNumber);
         // Remove any non-digit characters except + at the start
-        $phoneNumber = preg_replace('/[^\d+]/', '', $phoneNumber);
+        // CRITICAL: Preserve + at the start, remove everything else that's not a digit
+        $hasPlus = str_starts_with($phoneNumber, '+');
+        $phoneNumber = preg_replace('/[^\d]/', '', $phoneNumber); // Remove all non-digits
+        if ($hasPlus && ! str_starts_with($phoneNumber, '+')) {
+            $phoneNumber = '+'.$phoneNumber; // Restore + at the start if it was there
+        }
         $phoneNumber = trim($phoneNumber);
 
+        // Validate phone number format - must be E.164 format for Twilio
+        // E.164 format: +[country code][number] (e.g., +17039974024)
         if (empty($phoneNumber)) {
-            Log::error('Invalid phone number for call session', [
+            Log::error('Invalid phone number for call session - empty after cleaning', [
                 'call_session_id' => $callSession->id,
-                'original_phone' => $callSession->contact->phone,
+                'original_phone' => $contactPhone,
+                'cleaned_phone' => $phoneNumber,
             ]);
 
-            $response->say('Sorry, the phone number is invalid.', ['voice' => 'alice']);
+            $response->say('Sorry, the phone number is invalid. Goodbye.', ['voice' => 'alice']);
+
+            return $response->asXML();
+        }
+
+        // Ensure phone number starts with + for E.164 format
+        if (! str_starts_with($phoneNumber, '+')) {
+            Log::warning('Phone number missing + prefix, adding it', [
+                'call_session_id' => $callSession->id,
+                'phone_before' => $phoneNumber,
+            ]);
+            $phoneNumber = '+'.$phoneNumber;
+        }
+
+        // Validate minimum length (country code + number, e.g., +1XXXXXXXXXX = 12 chars minimum)
+        if (strlen($phoneNumber) < 12) {
+            Log::error('Invalid phone number for call session - too short', [
+                'call_session_id' => $callSession->id,
+                'phone_number' => $phoneNumber,
+                'length' => strlen($phoneNumber),
+            ]);
+
+            $response->say('Sorry, the phone number is invalid. Goodbye.', ['voice' => 'alice']);
 
             return $response->asXML();
         }

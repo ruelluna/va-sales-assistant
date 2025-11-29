@@ -66,6 +66,15 @@ class TwilioWebhookController extends Controller
 
     public function twiml(Request $request, $callSessionId = null)
     {
+        // Log immediately when endpoint is hit
+        Log::info('TwiML endpoint called', [
+            'url' => $request->fullUrl(),
+            'method' => $request->method(),
+            'route_call_session_id' => $callSessionId,
+            'query_params' => $request->all(),
+            'ip' => $request->ip(),
+        ]);
+
         try {
             // Support multiple ways to get call session ID:
             // 1. Route parameter: /api/twilio/twiml/31
@@ -252,10 +261,12 @@ class TwilioWebhookController extends Controller
             $twilioService = app(\App\Services\TwilioService::class);
             $twiml = $twilioService->generateTwiML($callSession);
 
-            // Log the generated TwiML
+            // Log the generated TwiML with actual content for debugging
             Log::info('TwiML generated', [
                 'call_session_id' => $callSession->id,
                 'twiml_length' => strlen($twiml),
+                'twiml_preview' => substr($twiml, 0, 500), // First 500 chars for debugging
+                'contact_phone_in_twiml' => $callSession->contact->phone ?? 'NOT SET',
             ]);
 
             return response($twiml, 200)
