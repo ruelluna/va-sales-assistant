@@ -26,7 +26,36 @@ class DialerInterface extends Component
 
     public bool $shouldMock = false;
 
-    protected $listeners = [];
+    protected $listeners = ['contactIdUpdated'];
+
+    public function contactIdUpdated($contactId): void
+    {
+        $contactId = (int) $contactId;
+
+        \Illuminate\Support\Facades\Log::info('DialerInterface::contactIdUpdated called', [
+            'contactId' => $contactId,
+            'current_initialContactId' => $this->initialContactId,
+            'current_active_call_contact_id' => $this->activeCallSession?->contact_id,
+        ]);
+
+        // If the contact ID changed, update it and restart the call process
+        if ($this->initialContactId !== $contactId) {
+            \Illuminate\Support\Facades\Log::info('Contact ID changed, updating and restarting call', [
+                'old_contact_id' => $this->initialContactId,
+                'new_contact_id' => $contactId,
+            ]);
+
+            $this->initialContactId = $contactId;
+
+            // End any existing call for a different contact
+            if ($this->activeCallSession && $this->activeCallSession->contact_id !== $contactId) {
+                $this->endCall();
+            }
+
+            // Call the new contact
+            $this->callContact($contactId);
+        }
+    }
 
     private const MOCK_TRANSCRIPTS = [
         ['speaker' => 'system', 'text' => 'Mock call connected.', 'timestamp' => 1],
@@ -124,11 +153,14 @@ class DialerInterface extends Component
         // Ensure contactId is an integer
         $contactId = (int) $contactId;
 
-        // Log for debugging
+        // Log for debugging - CRITICAL for tracing the issue
         \Illuminate\Support\Facades\Log::info('DialerInterface::callContact called', [
             'contactId' => $contactId,
+            'contactId_type' => gettype($contactId),
             'initialContactId' => $this->initialContactId,
+            'initialContactId_type' => gettype($this->initialContactId),
             'current_active_call_contact_id' => $this->activeCallSession?->contact_id,
+            'stack_trace' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5),
         ]);
 
         // CRITICAL: End ALL initiated/ringing call sessions for different contacts
@@ -214,22 +246,54 @@ class DialerInterface extends Component
             'status' => 'initiated',
         ]);
 
+        // CRITICAL: Immediately refresh from database to verify it was created correctly
+        $callSession->refresh();
+
+        // Verify the call session was created with the correct contact_id
+        if ($callSession->contact_id !== $contactId) {
+            \Illuminate\Support\Facades\Log::error('CRITICAL: Call session created with wrong contact_id', [
+                'expected_contact_id' => $contactId,
+                'actual_contact_id' => $callSession->contact_id,
+                'call_session_id' => $callSession->id,
+                'contact_phone_requested' => $contact->phone,
+            ]);
+
+            // Delete the incorrectly created call session
+            $callSession->delete();
+            session()->flash('error', 'Error creating call session. Please try again.');
+
+            return;
+        }
+
         // Log call session creation
-        \Illuminate\Support\Facades\Log::info('Call session created', [
+        \Illuminate\Support\Facades\Log::info('Call session created and verified', [
             'call_session_id' => $callSession->id,
             'contact_id' => $callSession->contact_id,
             'contact_phone' => $contact->phone,
+            'expected_contact_id' => $contactId,
         ]);
 
         // Load the call session with contact relationship to ensure phone number is available
         // Use fresh() to ensure we get the latest data from database
         $this->activeCallSession = CallSession::with('contact')->findOrFail($callSession->id);
 
+        // Double-verify the contact phone number matches what we expect
+        $loadedContactPhone = $this->activeCallSession->contact->phone ?? null;
+        if ($loadedContactPhone !== $contact->phone) {
+            \Illuminate\Support\Facades\Log::error('CRITICAL: Contact phone mismatch after loading call session', [
+                'call_session_id' => $this->activeCallSession->id,
+                'contact_id' => $this->activeCallSession->contact_id,
+                'expected_phone' => $contact->phone,
+                'loaded_phone' => $loadedContactPhone,
+            ]);
+        }
+
         // Verify the contact phone number is correct
-        \Illuminate\Support\Facades\Log::info('Active call session loaded', [
+        \Illuminate\Support\Facades\Log::info('Active call session loaded and verified', [
             'call_session_id' => $this->activeCallSession->id,
             'contact_id' => $this->activeCallSession->contact_id,
             'contact_phone' => $this->activeCallSession->contact->phone ?? 'N/A',
+            'contact_name' => $this->activeCallSession->contact->full_name ?? 'N/A',
         ]);
 
         // Load transcripts and AI state for this specific call session
@@ -388,26 +452,6 @@ class DialerInterface extends Component
     public function updatedActiveCallSession()
     {
         $this->loadActiveCall();
-    }
-
-    public function contactIdUpdated($contactId): void
-    {
-        $contactId = (int) $contactId;
-
-        \Illuminate\Support\Facades\Log::info('DialerInterface::contactIdUpdated called', [
-            'contactId' => $contactId,
-            'current_active_call_contact_id' => $this->activeCallSession?->contact_id,
-        ]);
-
-        // If there's an active call for a different contact, end it
-        if ($this->activeCallSession && $this->activeCallSession->contact_id !== $contactId) {
-            $this->endCall();
-        }
-
-        // Call the new contact if we don't have an active call
-        if (! $this->activeCallSession) {
-            $this->callContact($contactId);
-        }
     }
 
     public function callNext()

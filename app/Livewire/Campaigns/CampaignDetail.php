@@ -85,12 +85,25 @@ class CampaignDetail extends Component
 
         $contact = Contact::with('campaign')->findOrFail($contactId);
 
+        // Log for debugging
+        \Illuminate\Support\Facades\Log::info('CampaignDetail::callContact called', [
+            'contactId' => $contactId,
+            'contact_phone' => $contact->phone,
+            'contact_name' => $contact->full_name,
+            'campaign_id' => $contact->campaign_id,
+        ]);
+
         if (! $contact->campaign_id || ! $contact->campaign || $contact->campaign->status !== 'active') {
             session()->flash('error', 'Contact must be assigned to an active campaign to call.');
             $this->callingContactId = null;
 
             return;
         }
+
+        \Illuminate\Support\Facades\Log::info('CampaignDetail::callContact dispatching openDialer', [
+            'contactId' => $contactId,
+            'contact_phone' => $contact->phone,
+        ]);
 
         $this->dispatch('openDialer', contactId: $contactId);
         $this->callingContactId = null;

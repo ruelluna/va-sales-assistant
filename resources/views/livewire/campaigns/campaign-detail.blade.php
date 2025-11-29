@@ -121,8 +121,12 @@
                                         <div class="flex gap-2">
                                             @if ($campaign->status === 'active')
                                                 <button wire:click="callContact({{ $contact->id }})"
+                                                    wire:key="call-btn-{{ $contact->id }}"
+                                                    data-contact-id="{{ $contact->id }}"
+                                                    data-contact-phone="{{ $contact->phone }}"
                                                     wire:loading.attr="disabled"
                                                     wire:target="callContact({{ $contact->id }})"
+                                                    onclick="console.log('Call button clicked', { contactId: {{ $contact->id }}, phone: '{{ $contact->phone }}' });"
                                                     class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                                     <span wire:loading.remove
                                                         wire:target="callContact({{ $contact->id }})">Call</span>

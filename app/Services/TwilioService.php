@@ -43,6 +43,28 @@ class TwilioService
     {
         $response = new VoiceResponse;
 
+        // CRITICAL: Always refresh the call session and contact relationship to ensure we have the latest data
+        // This prevents using stale/cached contact data that might belong to a different contact
+        $callSession = $callSession->fresh(['contact']);
+
+        if (! $callSession->contact) {
+            Log::error('Call session missing contact relationship', [
+                'call_session_id' => $callSession->id,
+                'contact_id' => $callSession->contact_id,
+            ]);
+            $response->say('Sorry, contact information is missing. Goodbye.', ['voice' => 'alice']);
+
+            return $response->asXML();
+        }
+
+        // Log the contact details being used for TwiML generation
+        Log::info('Generating TwiML with contact details', [
+            'call_session_id' => $callSession->id,
+            'contact_id' => $callSession->contact_id,
+            'contact_phone' => $callSession->contact->phone ?? 'N/A',
+            'contact_name' => $callSession->contact->full_name ?? 'N/A',
+        ]);
+
         // Clean phone number - remove any Unicode formatting characters and ensure proper format
         $phoneNumber = $callSession->contact->phone;
         // Remove all Unicode directional formatting characters
@@ -95,6 +117,14 @@ class TwilioService
                 $stream->parameter(['name' => 'twilioCallSid', 'value' => $callSession->twilio_call_sid]);
             }
         }
+
+        // Log the phone number that will be dialed
+        Log::info('Dialing phone number in TwiML', [
+            'call_session_id' => $callSession->id,
+            'contact_id' => $callSession->contact_id,
+            'phone_number_to_dial' => $phoneNumber,
+            'original_contact_phone' => $callSession->contact->phone ?? 'N/A',
+        ]);
 
         // Dial the phone number
         // This will execute after Start, allowing both streaming and dialing to work

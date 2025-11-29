@@ -107,7 +107,12 @@ class TwilioWebhookController extends Controller
             }
 
             // Explicitly find the call session by ID to avoid route model binding issues
+            // Use fresh() to ensure we get the latest data from database, not cached
             $callSession = CallSession::with('contact')->findOrFail($callSessionIdInt);
+
+            // Double-check: refresh the relationship to ensure we have the latest contact data
+            $callSession->load('contact');
+            $callSession->contact->refresh();
 
             // Log for debugging
             Log::info('TwiML requested', [
@@ -115,6 +120,7 @@ class TwilioWebhookController extends Controller
                 'resolved_call_session_id' => $callSession->id,
                 'contact_id' => $callSession->contact_id,
                 'contact_phone' => $callSession->contact->phone ?? 'N/A',
+                'contact_name' => $callSession->contact->full_name ?? 'N/A',
             ]);
 
             $twilioService = app(\App\Services\TwilioService::class);
