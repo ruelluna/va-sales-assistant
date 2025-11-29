@@ -39,7 +39,7 @@ class TwilioService
         return $call->sid;
     }
 
-    public function generateTwiML(CallSession $callSession): string
+    public function generateTwiML(CallSession $callSession, ?string $phoneNumberToDial = null): string
     {
         $response = new VoiceResponse;
 
@@ -51,16 +51,6 @@ class TwilioService
         if (! $callSession->relationLoaded('contact') && ! $callSession->contact) {
             // Only load if contact doesn't exist at all
             $callSession = $callSession->fresh(['contact']);
-        }
-
-        if (! $callSession->contact) {
-            Log::error('Call session missing contact relationship', [
-                'call_session_id' => $callSession->id,
-                'contact_id' => $callSession->contact_id,
-            ]);
-            $response->say('Sorry, contact information is missing. Goodbye.', ['voice' => 'alice']);
-
-            return $response->asXML();
         }
 
         // Log the contact details being used for TwiML generation
@@ -82,29 +72,35 @@ class TwilioService
             $contactName = $callSession->contact->full_name ?? null;
         }
 
+        // CRITICAL: Use the phone number passed as parameter if provided, otherwise fall back to contact phone
+        // This ensures we always use the correct, validated phone number from the controller
+        $phoneNumber = $phoneNumberToDial ?: $contactPhone;
+        $originalPhoneNumber = $phoneNumber; // Store original for logging
+
         Log::info('Generating TwiML with contact details', [
             'call_session_id' => $callSession->id,
             'call_session_contact_id' => $callSession->contact_id,
             'contact_id_from_relation' => $contactIdFromRelation,
             'contact_phone' => $contactPhone ?? 'N/A',
+            'phone_number_to_dial_param' => $phoneNumberToDial ?? 'N/A',
+            'phone_number_being_used' => $phoneNumber ?? 'N/A',
             'contact_name' => $contactName ?? 'N/A',
             'contact_loaded_from' => $callSession->relationLoaded('contact') ? 'relation' : 'database',
             'contact_exists' => $callSession->contact !== null,
         ]);
 
         // Clean phone number - remove any Unicode formatting characters and ensure proper format
-        if (! $callSession->contact || ! $contactPhone) {
-            Log::error('Contact phone number is missing in generateTwiML', [
+        if (empty($phoneNumber)) {
+            Log::error('Phone number is missing in generateTwiML', [
                 'call_session_id' => $callSession->id,
                 'contact_exists' => $callSession->contact !== null,
                 'contact_phone' => $contactPhone,
+                'phone_number_to_dial_param' => $phoneNumberToDial,
             ]);
             $response->say('Sorry, contact information is missing. Goodbye.', ['voice' => 'alice']);
 
             return $response->asXML();
         }
-
-        $phoneNumber = $contactPhone;
         // Remove all Unicode directional formatting characters
         $phoneNumber = preg_replace('/[\x{200E}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $phoneNumber);
         // Remove any non-digit characters except + at the start
@@ -121,7 +117,7 @@ class TwilioService
         if (empty($phoneNumber)) {
             Log::error('Invalid phone number for call session - empty after cleaning', [
                 'call_session_id' => $callSession->id,
-                'original_phone' => $contactPhone,
+                'original_phone' => $originalPhoneNumber,
                 'cleaned_phone' => $phoneNumber,
             ]);
 

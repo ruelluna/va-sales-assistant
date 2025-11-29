@@ -259,7 +259,8 @@ class TwilioWebhookController extends Controller
             ]);
 
             $twilioService = app(\App\Services\TwilioService::class);
-            $twiml = $twilioService->generateTwiML($callSession);
+            // CRITICAL: Pass the validated phone number directly to ensure correct number is dialed
+            $twiml = $twilioService->generateTwiML($callSession, $phoneNumberToDial);
 
             // Log the generated TwiML with actual content for debugging
             Log::info('TwiML generated', [
