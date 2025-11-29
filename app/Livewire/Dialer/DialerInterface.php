@@ -83,10 +83,9 @@ class DialerInterface extends Component
         if ($contactId) {
             $contactId = (int) $contactId;
 
-            // CRITICAL: End ALL initiated call sessions for different contacts BEFORE loading active call
-            // This prevents reusing old call sessions that belong to different contacts
+            // CRITICAL: Always end ALL active call sessions and clear the property
+            // We NEVER want to reuse old call sessions - always create fresh ones
             $endedSessions = CallSession::where('va_user_id', auth()->id())
-                ->where('contact_id', '!=', $contactId)
                 ->whereIn('status', ['initiated', 'ringing'])
                 ->update([
                     'status' => 'completed',
@@ -94,49 +93,20 @@ class DialerInterface extends Component
                 ]);
 
             if ($endedSessions > 0) {
-                \Illuminate\Support\Facades\Log::info('Ended old call sessions for different contacts', [
+                \Illuminate\Support\Facades\Log::info('Ended ALL active call sessions in mount', [
                     'ended_count' => $endedSessions,
                     'target_contact_id' => $contactId,
                 ]);
             }
 
-            // Now load active call - should only find sessions for this contact (if any)
-            $this->loadActiveCall();
+            // Clear the active call session property to ensure we start fresh
+            $this->activeCallSession = null;
 
-            // If there's an active call session, verify it's for the correct contact
-            if ($this->activeCallSession) {
-                if ($this->activeCallSession->contact_id !== $contactId) {
-                    // This shouldn't happen after the cleanup above, but handle it anyway
-                    \Illuminate\Support\Facades\Log::warning('Found call session for different contact after cleanup', [
-                        'existing_contact_id' => $this->activeCallSession->contact_id,
-                        'expected_contact_id' => $contactId,
-                        'call_session_id' => $this->activeCallSession->id,
-                    ]);
-                    $this->endCall();
-                    $this->loadActiveCall();
-                } else {
-                    // Same contact, keep the existing call session
-                    \Illuminate\Support\Facades\Log::info('Keeping existing call session for same contact', [
-                        'contact_id' => $contactId,
-                        'call_session_id' => $this->activeCallSession->id,
-                    ]);
-
-                    if ($this->shouldMock) {
-                        $this->sendMockTranscripts();
-                        $this->shouldMock = false;
-                    }
-
-                    return;
-                }
-            }
-
-            // Only call if there's no active call session (or we just ended one)
-            if (! $this->activeCallSession) {
-                \Illuminate\Support\Facades\Log::info('DialerInterface::mount calling callContact', [
-                    'contactId' => $contactId,
-                ]);
-                $this->callContact($contactId);
-            }
+            // Always create a fresh call session - never reuse old ones
+            \Illuminate\Support\Facades\Log::info('DialerInterface::mount calling callContact', [
+                'contactId' => $contactId,
+            ]);
+            $this->callContact($contactId);
         } else {
             // No contact ID provided, just load active call normally
             $this->loadActiveCall();
@@ -185,11 +155,25 @@ class DialerInterface extends Component
 
         $contact = Contact::with('campaign')->findOrFail($contactId);
 
+        // CRITICAL: Verify the loaded contact matches the requested contact ID
+        if ($contact->id !== $contactId) {
+            \Illuminate\Support\Facades\Log::error('CRITICAL: Loaded contact ID does not match requested contact ID', [
+                'requested_contact_id' => $contactId,
+                'loaded_contact_id' => $contact->id,
+                'loaded_contact_phone' => $contact->phone,
+            ]);
+            session()->flash('error', 'Contact ID mismatch detected. Please try again.');
+
+            return;
+        }
+
         // Log contact details
         \Illuminate\Support\Facades\Log::info('Contact loaded for call', [
             'contact_id' => $contact->id,
             'phone' => $contact->phone,
             'campaign_id' => $contact->campaign_id,
+            'requested_contact_id' => $contactId,
+            'match' => $contact->id === $contactId,
         ]);
 
         // Check if contact has an active campaign
