@@ -192,15 +192,38 @@ class TwilioService
 
         // Dial the phone number
         // This will execute after Start, allowing both streaming and dialing to work
+        $callerId = config('services.twilio.phone_number');
+
+        Log::info('About to dial number', [
+            'call_session_id' => $callSession->id,
+            'phone_number' => $phoneNumber,
+            'caller_id' => $callerId,
+            'phone_number_length' => strlen($phoneNumber),
+            'phone_starts_with_plus' => str_starts_with($phoneNumber, '+'),
+        ]);
+
         $dial = $response->dial(null, [
-            'callerId' => config('services.twilio.phone_number'),
+            'callerId' => $callerId,
             'timeout' => 30, // Wait up to 30 seconds for the call to be answered
             'action' => route('api.twilio.status'), // Status callback URL
         ]);
 
         $dial->number($phoneNumber);
 
-        return $response->asXML();
+        $twimlXml = $response->asXML();
+
+        // Log the final TwiML XML for debugging
+        Log::info('TwiML XML generated', [
+            'call_session_id' => $callSession->id,
+            'twiml_length' => strlen($twimlXml),
+            'twiml_preview' => substr($twimlXml, 0, 1000), // First 1000 chars
+            'phone_number_in_dial' => $phoneNumber,
+        ]);
+
+        // Also use error_log as fallback
+        error_log('TwiML generated for call session '.$callSession->id.': Phone='.$phoneNumber.', TwiML length='.strlen($twimlXml));
+
+        return $twimlXml;
     }
 
     public function getCall(string $callSid)

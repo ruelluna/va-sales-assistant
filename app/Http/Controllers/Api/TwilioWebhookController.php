@@ -66,14 +66,19 @@ class TwilioWebhookController extends Controller
 
     public function twiml(Request $request, $callSessionId = null)
     {
-        // Log immediately when endpoint is hit
-        Log::info('TwiML endpoint called', [
+        // Log immediately when endpoint is hit - use both Log facade and error_log as fallback
+        $logData = [
             'url' => $request->fullUrl(),
             'method' => $request->method(),
             'route_call_session_id' => $callSessionId,
             'query_params' => $request->all(),
             'ip' => $request->ip(),
-        ]);
+        ];
+
+        // Use error_log as fallback to ensure we capture logs even if Log facade fails
+        error_log('TwiML endpoint called: '.json_encode($logData));
+
+        Log::info('TwiML endpoint called', $logData);
 
         try {
             // Support multiple ways to get call session ID:
