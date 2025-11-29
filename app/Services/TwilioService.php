@@ -62,16 +62,32 @@ class TwilioService
         }
 
         // Log the contact details being used for TwiML generation
+        $contactPhone = $callSession->contact ? ($callSession->contact->phone ?? null) : null;
+        $contactIdFromRelation = $callSession->contact ? ($callSession->contact->id ?? null) : null;
+
         Log::info('Generating TwiML with contact details', [
             'call_session_id' => $callSession->id,
-            'contact_id' => $callSession->contact_id,
-            'contact_phone' => $callSession->contact->phone ?? 'N/A',
+            'call_session_contact_id' => $callSession->contact_id,
+            'contact_id_from_relation' => $contactIdFromRelation,
+            'contact_phone' => $contactPhone ?? 'N/A',
             'contact_name' => $callSession->contact->full_name ?? 'N/A',
             'contact_loaded_from' => $callSession->relationLoaded('contact') ? 'relation' : 'database',
+            'contact_exists' => $callSession->contact !== null,
         ]);
 
         // Clean phone number - remove any Unicode formatting characters and ensure proper format
-        $phoneNumber = $callSession->contact->phone;
+        if (! $callSession->contact || ! $contactPhone) {
+            Log::error('Contact phone number is missing in generateTwiML', [
+                'call_session_id' => $callSession->id,
+                'contact_exists' => $callSession->contact !== null,
+                'contact_phone' => $contactPhone,
+            ]);
+            $response->say('Sorry, contact information is missing. Goodbye.', ['voice' => 'alice']);
+
+            return $response->asXML();
+        }
+
+        $phoneNumber = $contactPhone;
         // Remove all Unicode directional formatting characters
         $phoneNumber = preg_replace('/[\x{200E}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $phoneNumber);
         // Remove any non-digit characters except + at the start

@@ -166,7 +166,19 @@ class TwilioWebhookController extends Controller
 
             // CRITICAL: Determine the phone number to dial BEFORE loading call session
             // Priority: 1) phoneNumberFromUrl, 2) contactData from database
-            $phoneNumberToDial = $phoneNumberFromUrl ?: $contactData->phone;
+            $phoneNumberToDial = $phoneNumberFromUrl ?: ($contactData->phone ?? null);
+
+            if (empty($phoneNumberToDial)) {
+                Log::error('CRITICAL: No phone number available to dial', [
+                    'call_session_id' => $callSessionIdInt,
+                    'phone_number_from_url' => $phoneNumberFromUrl,
+                    'contact_data_phone' => $contactData->phone ?? null,
+                ]);
+                $response = new \Twilio\TwiML\VoiceResponse;
+                $response->say('Sorry, phone number is missing. Goodbye.', ['voice' => 'alice']);
+
+                return response($response->asXML(), 200)->header('Content-Type', 'text/xml');
+            }
 
             // Load the call session WITHOUT eager loading contact if we're going to override it
             // This prevents loading the wrong contact that would be cached
@@ -176,10 +188,12 @@ class TwilioWebhookController extends Controller
 
                 // CRITICAL: Create a temporary contact object with the phone number we're going to dial
                 // This ensures TwilioService always uses the correct phone number
+                // Use the Contact model to ensure all required attributes are available
                 $tempContact = new \App\Models\Contact;
-                $tempContact->phone = $phoneNumberToDial;
                 $tempContact->id = $contactIdToUse;
+                $tempContact->phone = $phoneNumberToDial;
                 $tempContact->full_name = $contactData->full_name ?? null;
+                $tempContact->exists = true; // Mark as existing to prevent save attempts
                 $callSession->setRelation('contact', $tempContact);
             } else {
                 // Load with correct contact if no URL override needed
@@ -195,6 +209,14 @@ class TwilioWebhookController extends Controller
             }
 
             // Log for debugging - CRITICAL for production debugging
+            // Safely get contact info to avoid exceptions
+            $contactPhone = null;
+            $contactIdFromRelation = null;
+            if ($callSession->relationLoaded('contact') && $callSession->contact) {
+                $contactPhone = $callSession->contact->phone ?? null;
+                $contactIdFromRelation = $callSession->contact->id ?? null;
+            }
+
             Log::info('TwiML requested', [
                 'requested_call_session_id' => $callSessionId,
                 'resolved_call_session_id' => $callSession->id,
@@ -204,8 +226,8 @@ class TwilioWebhookController extends Controller
                 'phone_number_from_url' => $phoneNumberFromUrl,
                 'phone_number_from_db' => $contactData->phone ?? null,
                 'phone_number_to_dial' => $phoneNumberToDial,
-                'call_session_contact_phone' => $callSession->contact->phone ?? 'NOT SET',
-                'call_session_contact_id_from_relation' => $callSession->contact->id ?? 'NOT SET',
+                'call_session_contact_phone' => $contactPhone ?? 'NOT SET',
+                'call_session_contact_id_from_relation' => $contactIdFromRelation ?? 'NOT SET',
                 'contact_relation_loaded' => $callSession->relationLoaded('contact'),
                 'va_user_id' => $callSession->va_user_id,
                 'status' => $callSession->status,
@@ -225,8 +247,14 @@ class TwilioWebhookController extends Controller
         } catch (\Exception $e) {
             Log::error('Error generating TwiML', [
                 'requested_call_session_id' => $callSessionId ?? 'unknown',
+                'call_session_id_int' => $callSessionIdInt ?? null,
                 'error' => $e->getMessage(),
+                'error_class' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString(),
+                'request_url' => $request->fullUrl(),
+                'request_params' => $request->all(),
             ]);
 
             // Return error TwiML
