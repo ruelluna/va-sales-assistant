@@ -137,12 +137,20 @@
             const initialContactId = {{ $initialContactId ?? 'null' }};
 
             // Verify the call session matches the expected contact
+            console.log('Call initialization check', {
+                callSessionId: callSessionId,
+                callSessionContactId: expectedContactId,
+                initialContactId: initialContactId,
+                match: initialContactId === null || expectedContactId === initialContactId
+            });
+
             if (initialContactId !== null && expectedContactId !== initialContactId) {
-                console.error('Mismatch detected: Call session contact ID does not match initial contact ID', {
+                console.error('CRITICAL: Call session contact ID mismatch - preventing call initialization', {
                     callSessionContactId: expectedContactId,
                     initialContactId: initialContactId,
                     callSessionId: callSessionId
                 });
+                alert('Error: Call session mismatch detected. The call session belongs to a different contact. Please try again.');
                 // Don't initialize call if there's a mismatch - let Livewire handle it
                 return;
             }

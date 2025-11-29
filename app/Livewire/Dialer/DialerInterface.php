@@ -51,26 +51,45 @@ class DialerInterface extends Component
         // Check if a contact ID is provided via query parameter or initial contact
         $contactId = $this->initialContactId ?? request()->query('contact');
 
-        // Always load active call first to check for existing sessions
-        $this->loadActiveCall();
-
         if ($contactId) {
             $contactId = (int) $contactId;
 
-            // If there's an active call session but it's for a different contact, end it first
+            // CRITICAL: End ALL initiated call sessions for different contacts BEFORE loading active call
+            // This prevents reusing old call sessions that belong to different contacts
+            $endedSessions = CallSession::where('va_user_id', auth()->id())
+                ->where('contact_id', '!=', $contactId)
+                ->whereIn('status', ['initiated', 'ringing'])
+                ->update([
+                    'status' => 'completed',
+                    'ended_at' => now(),
+                ]);
+
+            if ($endedSessions > 0) {
+                \Illuminate\Support\Facades\Log::info('Ended old call sessions for different contacts', [
+                    'ended_count' => $endedSessions,
+                    'target_contact_id' => $contactId,
+                ]);
+            }
+
+            // Now load active call - should only find sessions for this contact (if any)
+            $this->loadActiveCall();
+
+            // If there's an active call session, verify it's for the correct contact
             if ($this->activeCallSession) {
                 if ($this->activeCallSession->contact_id !== $contactId) {
-                    \Illuminate\Support\Facades\Log::info('Ending existing call session for different contact', [
+                    // This shouldn't happen after the cleanup above, but handle it anyway
+                    \Illuminate\Support\Facades\Log::warning('Found call session for different contact after cleanup', [
                         'existing_contact_id' => $this->activeCallSession->contact_id,
-                        'new_contact_id' => $contactId,
+                        'expected_contact_id' => $contactId,
+                        'call_session_id' => $this->activeCallSession->id,
                     ]);
                     $this->endCall();
-                    // Reload to ensure activeCallSession is cleared
                     $this->loadActiveCall();
                 } else {
                     // Same contact, keep the existing call session
                     \Illuminate\Support\Facades\Log::info('Keeping existing call session for same contact', [
                         'contact_id' => $contactId,
+                        'call_session_id' => $this->activeCallSession->id,
                     ]);
 
                     if ($this->shouldMock) {
@@ -89,6 +108,9 @@ class DialerInterface extends Component
                 ]);
                 $this->callContact($contactId);
             }
+        } else {
+            // No contact ID provided, just load active call normally
+            $this->loadActiveCall();
         }
 
         if ($this->shouldMock && $this->activeCallSession) {
@@ -109,6 +131,23 @@ class DialerInterface extends Component
             'current_active_call_contact_id' => $this->activeCallSession?->contact_id,
         ]);
 
+        // CRITICAL: End ALL initiated/ringing call sessions for different contacts
+        // This ensures we never reuse an old call session
+        $endedSessions = CallSession::where('va_user_id', auth()->id())
+            ->where('contact_id', '!=', $contactId)
+            ->whereIn('status', ['initiated', 'ringing'])
+            ->update([
+                'status' => 'completed',
+                'ended_at' => now(),
+            ]);
+
+        if ($endedSessions > 0) {
+            \Illuminate\Support\Facades\Log::info('Ended call sessions for different contacts in callContact', [
+                'ended_count' => $endedSessions,
+                'target_contact_id' => $contactId,
+            ]);
+        }
+
         // Double-check: if there's an active call for a different contact, end it first
         if ($this->activeCallSession && $this->activeCallSession->contact_id !== $contactId) {
             \Illuminate\Support\Facades\Log::info('Ending active call session for different contact before calling new contact', [
@@ -121,7 +160,7 @@ class DialerInterface extends Component
         // Reload to ensure we have the latest state
         $this->loadActiveCall();
 
-        // If there's still an active call (shouldn't happen, but safety check), return
+        // If there's still an active call, verify it's for the correct contact
         if ($this->activeCallSession) {
             if ($this->activeCallSession->contact_id === $contactId) {
                 \Illuminate\Support\Facades\Log::info('Call session already exists for this contact', [
@@ -132,6 +171,12 @@ class DialerInterface extends Component
                 return;
             }
 
+            // This shouldn't happen after cleanup, but handle it
+            \Illuminate\Support\Facades\Log::error('Active call session exists for different contact after cleanup', [
+                'existing_contact_id' => $this->activeCallSession->contact_id,
+                'expected_contact_id' => $contactId,
+                'call_session_id' => $this->activeCallSession->id,
+            ]);
             session()->flash('error', 'You already have an active call. Please end it before starting a new one.');
 
             return;
