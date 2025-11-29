@@ -43,9 +43,13 @@ class TwilioService
     {
         $response = new VoiceResponse;
 
-        // CRITICAL: Always refresh the call session and contact relationship to ensure we have the latest data
-        // This prevents using stale/cached contact data that might belong to a different contact
-        $callSession = $callSession->fresh(['contact']);
+        // CRITICAL: DO NOT refresh the contact relationship here!
+        // The TwilioWebhookController already sets the correct contact with setRelation()
+        // Refreshing would reload the wrong contact from the database
+        // Only refresh if contact is not already loaded
+        if (! $callSession->relationLoaded('contact')) {
+            $callSession = $callSession->fresh(['contact']);
+        }
 
         if (! $callSession->contact) {
             Log::error('Call session missing contact relationship', [
@@ -63,6 +67,7 @@ class TwilioService
             'contact_id' => $callSession->contact_id,
             'contact_phone' => $callSession->contact->phone ?? 'N/A',
             'contact_name' => $callSession->contact->full_name ?? 'N/A',
+            'contact_loaded_from' => $callSession->relationLoaded('contact') ? 'relation' : 'database',
         ]);
 
         // Clean phone number - remove any Unicode formatting characters and ensure proper format

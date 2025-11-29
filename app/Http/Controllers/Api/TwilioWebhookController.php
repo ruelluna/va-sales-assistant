@@ -164,26 +164,33 @@ class TwilioWebhookController extends Controller
                 return response($response->asXML(), 200)->header('Content-Type', 'text/xml');
             }
 
-            // Load the call session
-            $callSession = CallSession::with('contact')->findOrFail($callSessionData->id);
-
-            // CRITICAL: Determine the phone number to dial
+            // CRITICAL: Determine the phone number to dial BEFORE loading call session
             // Priority: 1) phoneNumberFromUrl, 2) contactData from database
             $phoneNumberToDial = $phoneNumberFromUrl ?: $contactData->phone;
 
-            // CRITICAL: Create a temporary contact object with the phone number we're going to dial
-            // This ensures TwilioService always uses the correct phone number
+            // Load the call session WITHOUT eager loading contact if we're going to override it
+            // This prevents loading the wrong contact that would be cached
             if ($phoneNumberFromUrl || $expectedContactId) {
-                // Use phone number from URL if provided, or use contact from database
+                // Don't eager load contact - we'll set a temp one
+                $callSession = CallSession::findOrFail($callSessionData->id);
+
+                // CRITICAL: Create a temporary contact object with the phone number we're going to dial
+                // This ensures TwilioService always uses the correct phone number
                 $tempContact = new \App\Models\Contact;
                 $tempContact->phone = $phoneNumberToDial;
                 $tempContact->id = $contactIdToUse;
+                $tempContact->full_name = $contactData->full_name ?? null;
                 $callSession->setRelation('contact', $tempContact);
             } else {
-                // Fallback: Override the contact relationship with the correct contact from database
-                $correctContact = \App\Models\Contact::find($contactIdToUse);
-                if ($correctContact) {
-                    $callSession->setRelation('contact', $correctContact);
+                // Load with correct contact if no URL override needed
+                $callSession = CallSession::with('contact')->findOrFail($callSessionData->id);
+
+                // Still override if contact_id doesn't match
+                if ($callSession->contact_id !== $contactIdToUse) {
+                    $correctContact = \App\Models\Contact::find($contactIdToUse);
+                    if ($correctContact) {
+                        $callSession->setRelation('contact', $correctContact);
+                    }
                 }
             }
 
@@ -197,6 +204,9 @@ class TwilioWebhookController extends Controller
                 'phone_number_from_url' => $phoneNumberFromUrl,
                 'phone_number_from_db' => $contactData->phone ?? null,
                 'phone_number_to_dial' => $phoneNumberToDial,
+                'call_session_contact_phone' => $callSession->contact->phone ?? 'NOT SET',
+                'call_session_contact_id_from_relation' => $callSession->contact->id ?? 'NOT SET',
+                'contact_relation_loaded' => $callSession->relationLoaded('contact'),
                 'va_user_id' => $callSession->va_user_id,
                 'status' => $callSession->status,
             ]);
