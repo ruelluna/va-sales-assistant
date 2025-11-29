@@ -163,10 +163,10 @@ class DialerInterface extends Component
             'stack_trace' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5),
         ]);
 
-        // CRITICAL: End ALL initiated/ringing call sessions for different contacts
-        // This ensures we never reuse an old call session
+        // CRITICAL: End ALL initiated/ringing call sessions for THIS user, regardless of contact
+        // This ensures we NEVER reuse an old call session, even if it's for the same contact
+        // We always want a fresh call session for each new call attempt
         $endedSessions = CallSession::where('va_user_id', auth()->id())
-            ->where('contact_id', '!=', $contactId)
             ->whereIn('status', ['initiated', 'ringing'])
             ->update([
                 'status' => 'completed',
@@ -174,45 +174,14 @@ class DialerInterface extends Component
             ]);
 
         if ($endedSessions > 0) {
-            \Illuminate\Support\Facades\Log::info('Ended call sessions for different contacts in callContact', [
+            \Illuminate\Support\Facades\Log::info('Ended ALL active call sessions before creating new one', [
                 'ended_count' => $endedSessions,
                 'target_contact_id' => $contactId,
             ]);
         }
 
-        // Double-check: if there's an active call for a different contact, end it first
-        if ($this->activeCallSession && $this->activeCallSession->contact_id !== $contactId) {
-            \Illuminate\Support\Facades\Log::info('Ending active call session for different contact before calling new contact', [
-                'existing_contact_id' => $this->activeCallSession->contact_id,
-                'new_contact_id' => $contactId,
-            ]);
-            $this->endCall();
-        }
-
-        // Reload to ensure we have the latest state
-        $this->loadActiveCall();
-
-        // If there's still an active call, verify it's for the correct contact
-        if ($this->activeCallSession) {
-            if ($this->activeCallSession->contact_id === $contactId) {
-                \Illuminate\Support\Facades\Log::info('Call session already exists for this contact', [
-                    'contact_id' => $contactId,
-                    'call_session_id' => $this->activeCallSession->id,
-                ]);
-
-                return;
-            }
-
-            // This shouldn't happen after cleanup, but handle it
-            \Illuminate\Support\Facades\Log::error('Active call session exists for different contact after cleanup', [
-                'existing_contact_id' => $this->activeCallSession->contact_id,
-                'expected_contact_id' => $contactId,
-                'call_session_id' => $this->activeCallSession->id,
-            ]);
-            session()->flash('error', 'You already have an active call. Please end it before starting a new one.');
-
-            return;
-        }
+        // Clear the active call session property to ensure we start fresh
+        $this->activeCallSession = null;
 
         $contact = Contact::with('campaign')->findOrFail($contactId);
 
