@@ -122,6 +122,22 @@ class TwilioWebhookController extends Controller
                 return response($response->asXML(), 200)->header('Content-Type', 'text/xml');
             }
 
+            // CRITICAL: Get the contact directly from database to ensure we have the correct phone number
+            $contactData = \Illuminate\Support\Facades\DB::table('contacts')
+                ->where('id', $callSessionData->contact_id)
+                ->first();
+
+            if (! $contactData) {
+                Log::error('CRITICAL: Contact not found for call session', [
+                    'call_session_id' => $callSessionIdInt,
+                    'contact_id' => $callSessionData->contact_id,
+                ]);
+                $response = new \Twilio\TwiML\VoiceResponse;
+                $response->say('Sorry, contact not found. Goodbye.', ['voice' => 'alice']);
+
+                return response($response->asXML(), 200)->header('Content-Type', 'text/xml');
+            }
+
             // Load the call session with contact using the ID from database
             $callSession = CallSession::with('contact')->findOrFail($callSessionData->id);
 
@@ -137,16 +153,33 @@ class TwilioWebhookController extends Controller
                 $callSession->load('contact');
             }
 
-            // Log for debugging
+            // CRITICAL: Verify the contact phone matches what's in the database
+            $dbPhone = $contactData->phone ?? null;
+            $eloquentPhone = $callSession->contact->phone ?? null;
+
+            if ($dbPhone !== $eloquentPhone) {
+                Log::error('CRITICAL: Contact phone mismatch between Eloquent and database', [
+                    'call_session_id' => $callSessionIdInt,
+                    'contact_id' => $callSessionData->contact_id,
+                    'database_phone' => $dbPhone,
+                    'eloquent_phone' => $eloquentPhone,
+                ]);
+                // Use the database phone number
+                $callSession->contact->phone = $dbPhone;
+            }
+
+            // Log for debugging - CRITICAL for production debugging
             Log::info('TwiML requested', [
                 'requested_call_session_id' => $callSessionId,
                 'resolved_call_session_id' => $callSession->id,
                 'contact_id' => $callSession->contact_id,
                 'contact_id_from_db' => $callSessionData->contact_id,
                 'contact_phone' => $callSession->contact->phone ?? 'N/A',
+                'contact_phone_from_db' => $dbPhone ?? 'N/A',
                 'contact_name' => $callSession->contact->full_name ?? 'N/A',
                 'va_user_id' => $callSession->va_user_id,
                 'status' => $callSession->status,
+                'phone_match' => $dbPhone === $eloquentPhone,
             ]);
 
             $twilioService = app(\App\Services\TwilioService::class);
