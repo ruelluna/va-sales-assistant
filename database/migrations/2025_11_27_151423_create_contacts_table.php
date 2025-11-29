@@ -11,18 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('contacts', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('campaign_id')->nullable()->constrained()->nullOnDelete();
-            $table->string('first_name');
-            $table->string('last_name');
-            $table->string('phone');
-            $table->string('email')->nullable();
-            $table->string('company')->nullable();
-            $table->json('tags')->nullable();
-            $table->string('timezone')->nullable();
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('contacts')) {
+            Schema::create('contacts', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('campaign_id')->nullable()->constrained()->nullOnDelete();
+                $table->string('first_name');
+                $table->string('last_name');
+                $table->string('phone');
+                $table->string('email')->nullable();
+                $table->string('company')->nullable();
+                $table->json('tags')->nullable();
+                $table->string('timezone')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**
