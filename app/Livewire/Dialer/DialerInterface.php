@@ -48,19 +48,38 @@ class DialerInterface extends Component
             'initialContactId' => $this->initialContactId,
         ]);
 
-        $this->loadActiveCall();
-
         // Check if a contact ID is provided via query parameter or initial contact
         $contactId = $this->initialContactId ?? request()->query('contact');
 
+        // Always load active call first to check for existing sessions
+        $this->loadActiveCall();
+
         if ($contactId) {
+            $contactId = (int) $contactId;
+
             // If there's an active call session but it's for a different contact, end it first
-            if ($this->activeCallSession && $this->activeCallSession->contact_id !== (int) $contactId) {
-                \Illuminate\Support\Facades\Log::info('Ending existing call session for different contact', [
-                    'existing_contact_id' => $this->activeCallSession->contact_id,
-                    'new_contact_id' => $contactId,
-                ]);
-                $this->endCall();
+            if ($this->activeCallSession) {
+                if ($this->activeCallSession->contact_id !== $contactId) {
+                    \Illuminate\Support\Facades\Log::info('Ending existing call session for different contact', [
+                        'existing_contact_id' => $this->activeCallSession->contact_id,
+                        'new_contact_id' => $contactId,
+                    ]);
+                    $this->endCall();
+                    // Reload to ensure activeCallSession is cleared
+                    $this->loadActiveCall();
+                } else {
+                    // Same contact, keep the existing call session
+                    \Illuminate\Support\Facades\Log::info('Keeping existing call session for same contact', [
+                        'contact_id' => $contactId,
+                    ]);
+
+                    if ($this->shouldMock) {
+                        $this->sendMockTranscripts();
+                        $this->shouldMock = false;
+                    }
+
+                    return;
+                }
             }
 
             // Only call if there's no active call session (or we just ended one)
@@ -68,7 +87,7 @@ class DialerInterface extends Component
                 \Illuminate\Support\Facades\Log::info('DialerInterface::mount calling callContact', [
                     'contactId' => $contactId,
                 ]);
-                $this->callContact((int) $contactId);
+                $this->callContact($contactId);
             }
         }
 
@@ -87,7 +106,36 @@ class DialerInterface extends Component
         \Illuminate\Support\Facades\Log::info('DialerInterface::callContact called', [
             'contactId' => $contactId,
             'initialContactId' => $this->initialContactId,
+            'current_active_call_contact_id' => $this->activeCallSession?->contact_id,
         ]);
+
+        // Double-check: if there's an active call for a different contact, end it first
+        if ($this->activeCallSession && $this->activeCallSession->contact_id !== $contactId) {
+            \Illuminate\Support\Facades\Log::info('Ending active call session for different contact before calling new contact', [
+                'existing_contact_id' => $this->activeCallSession->contact_id,
+                'new_contact_id' => $contactId,
+            ]);
+            $this->endCall();
+        }
+
+        // Reload to ensure we have the latest state
+        $this->loadActiveCall();
+
+        // If there's still an active call (shouldn't happen, but safety check), return
+        if ($this->activeCallSession) {
+            if ($this->activeCallSession->contact_id === $contactId) {
+                \Illuminate\Support\Facades\Log::info('Call session already exists for this contact', [
+                    'contact_id' => $contactId,
+                    'call_session_id' => $this->activeCallSession->id,
+                ]);
+
+                return;
+            }
+
+            session()->flash('error', 'You already have an active call. Please end it before starting a new one.');
+
+            return;
+        }
 
         $contact = Contact::with('campaign')->findOrFail($contactId);
 
@@ -112,13 +160,6 @@ class DialerInterface extends Component
             return;
         }
 
-        // Check if there's already an active call
-        if ($this->activeCallSession) {
-            session()->flash('error', 'You already have an active call. Please end it before starting a new one.');
-
-            return;
-        }
-
         $callSession = CallSession::create([
             'contact_id' => $contact->id,
             'campaign_id' => $contact->campaign_id,
@@ -132,6 +173,7 @@ class DialerInterface extends Component
         \Illuminate\Support\Facades\Log::info('Call session created', [
             'call_session_id' => $callSession->id,
             'contact_id' => $callSession->contact_id,
+            'contact_phone' => $contact->phone,
         ]);
 
         // Load the call session with contact relationship to ensure phone number is available

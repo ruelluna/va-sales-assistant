@@ -134,9 +134,22 @@
         <div x-data x-init="(async function() {
             const callSessionId = {{ $activeCallSession->id }};
             const expectedContactId = {{ $activeCallSession->contact_id }};
+            const initialContactId = {{ $initialContactId ?? 'null' }};
 
-            // Prevent multiple initializations
+            // Verify the call session matches the expected contact
+            if (initialContactId !== null && expectedContactId !== initialContactId) {
+                console.error('Mismatch detected: Call session contact ID does not match initial contact ID', {
+                    callSessionContactId: expectedContactId,
+                    initialContactId: initialContactId,
+                    callSessionId: callSessionId
+                });
+                // Don't initialize call if there's a mismatch - let Livewire handle it
+                return;
+            }
+
+            // Prevent multiple initializations for the same call session
             if (window.activeCallInitialized && window.activeCallInitialized === callSessionId) {
+                console.log('Call already initialized for session:', callSessionId);
                 return;
             }
             window.activeCallInitialized = callSessionId;
