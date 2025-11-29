@@ -11,10 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        if (!Schema::hasTable('contacts')) {
+        if (! Schema::hasTable('contacts')) {
             Schema::create('contacts', function (Blueprint $table) {
                 $table->id();
-                $table->foreignId('campaign_id')->nullable()->constrained()->nullOnDelete();
+                $table->unsignedBigInteger('campaign_id')->nullable();
                 $table->string('first_name');
                 $table->string('last_name');
                 $table->string('phone');
@@ -24,6 +24,23 @@ return new class extends Migration
                 $table->string('timezone')->nullable();
                 $table->timestamps();
             });
+        }
+
+        // Add foreign key constraint only if campaigns table exists and constraint doesn't exist
+        if (Schema::hasTable('campaigns') && Schema::hasTable('contacts') && Schema::hasColumn('contacts', 'campaign_id')) {
+            try {
+                Schema::table('contacts', function (Blueprint $table) {
+                    $table->foreign('campaign_id')
+                        ->references('id')
+                        ->on('campaigns')
+                        ->nullOnDelete();
+                });
+            } catch (\Exception $e) {
+                // Foreign key constraint might already exist, ignore the error
+                if (! str_contains($e->getMessage(), 'Duplicate key name') && ! str_contains($e->getMessage(), 'already exists')) {
+                    throw $e;
+                }
+            }
         }
     }
 

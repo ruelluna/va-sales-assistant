@@ -11,16 +11,18 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('campaigns', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('product_name');
-            $table->longText('script')->nullable();
-            $table->longText('ai_prompt_context')->nullable();
-            $table->text('success_definition')->nullable();
-            $table->enum('status', ['draft', 'active', 'paused', 'completed'])->default('draft');
-            $table->timestamps();
-        });
+        if (! Schema::hasTable('campaigns')) {
+            Schema::create('campaigns', function (Blueprint $table) {
+                $table->id();
+                $table->string('name');
+                $table->string('product_name');
+                $table->longText('script')->nullable();
+                $table->longText('ai_prompt_context')->nullable();
+                $table->text('success_definition')->nullable();
+                $table->enum('status', ['draft', 'active', 'paused', 'completed'])->default('draft');
+                $table->timestamps();
+            });
+        }
     }
 
     /**
